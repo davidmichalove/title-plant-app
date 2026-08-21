@@ -1521,7 +1521,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         try:
             self.wb.save(self.excel_path)
             if show_msg:
-                messagebox.showinfo("Success", f"Row {self.current_row_idx} saved!", parent=self)
+                self.show_save_success_dialog(self.current_row_idx)
             
             # Refresh listbox display without losing selection
             sel = self.listbox.curselection()
@@ -2931,6 +2931,49 @@ class RunsheetEditorWindow(tk.Toplevel):
                     widget.insert(tk.INSERT, phrase)
                 except Exception: pass
         return "break"
+
+    def show_save_success_dialog(self, row_idx):
+        popup = tk.Toplevel(self)
+        popup.title("Success")
+        popup.geometry("320x150")
+        popup.attributes("-topmost", True)
+        popup.resizable(False, False)
+        popup.transient(self)
+        
+        # Center over editor window
+        try:
+            x = self.winfo_rootx() + (self.winfo_width() // 2) - 160
+            y = self.winfo_rooty() + (self.winfo_height() // 2) - 75
+            popup.geometry(f"+{x}+{y}")
+        except Exception: pass
+        
+        popup.grab_set()
+        
+        frame = ttk.Frame(popup, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text=f"✅  Row {row_idx} saved!", font=("Helvetica", 15, "bold")).pack(pady=(0, 15))
+        
+        def close_dialog(event=None):
+            try:
+                popup.grab_release()
+                popup.destroy()
+            except Exception: pass
+            return "break"
+            
+        ok_btn = ttk.Button(frame, text="OK", command=close_dialog)
+        ok_btn.pack()
+        ok_btn.focus_set()
+        
+        ok_btn.bind("<Return>", close_dialog)
+        ok_btn.bind("<KP_Enter>", close_dialog)
+        ok_btn.bind("<space>", close_dialog)
+        popup.bind("<Return>", close_dialog)
+        popup.bind("<KP_Enter>", close_dialog)
+        popup.bind("<space>", close_dialog)
+        popup.bind("<Escape>", close_dialog)
+        
+        self.wait_window(popup)
 
     def show_shortcuts_dialog(self):
         popup = tk.Toplevel(self)
