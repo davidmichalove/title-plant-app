@@ -8,17 +8,17 @@ import runsheet_editor
 import gemini_rs_engine
 
 class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
-    def __init__(self, master, excel_path):
-        self.provenance_file = os.path.join(os.path.dirname(excel_path), "gemini_source_provenance.json")
+    def __init__(self, parent, parcel_id, app_dir):
+        super().__init__(parent, parcel_id, app_dir)
+        self.title(f"✨ Gemini Runsheet Editor (AI Powered) - {parcel_id}")
+
+        self.provenance_file = os.path.join(self.pid_dir, "gemini_source_provenance.json")
         self.provenance_data = {}
         if os.path.exists(self.provenance_file):
             try:
                 with open(self.provenance_file, "r") as f:
                     self.provenance_data = json.load(f)
             except Exception: pass
-
-        super().__init__(master, excel_path)
-        self.title(f"✨ Gemini Runsheet Editor (AI Powered) - {os.path.basename(excel_path)}")
 
         # Add Gemini specific buttons to bottom_bar
         if hasattr(self, 'phrase_btn') and self.phrase_btn.master:

@@ -4149,30 +4149,14 @@ end tell'''
         ttk.Button(dialog, text="Save to Notes", command=on_save).grid(row=4, column=0, columnspan=2, pady=15)
         
     def open_gemini_rs_editor(self):
-        parcel_num = self.parcel_entry.get().strip()
-        if not parcel_num:
-            messagebox.showerror("Error", "Please enter a Parcel Number.")
+        pid = self.parcel_entry.get().strip()
+        if not pid:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Please enter a Parcel Number (PID) first.")
             return
-
-        pid_dir = self.get_parcel_dir(parcel_num)
-        if not os.path.exists(pid_dir):
-            messagebox.showerror("Error", f"Parcel folder does not exist:\n{pid_dir}")
-            return
-
-        import glob
-        rs_files = glob.glob(os.path.join(pid_dir, "*RS*.xlsx"))
-        if not rs_files:
-            messagebox.showerror("Error", f"No Runsheet Excel file found in {pid_dir}")
-            return
-
-        rs_path = rs_files[0]
-        for rf in rs_files:
-            if "BLANK" not in rf and "Backup" not in rf and "copy" not in rf:
-                rs_path = rf
-                break
 
         import gemini_runsheet_editor
-        gemini_runsheet_editor.GeminiRunsheetEditorWindow(self.root, rs_path)
+        gemini_runsheet_editor.GeminiRunsheetEditorWindow(self.root, pid, os.path.dirname(os.path.abspath(__file__)))
 
     def open_rs_editor(self):
         pid = self.parcel_entry.get().strip()
