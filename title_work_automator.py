@@ -114,14 +114,20 @@ class AutomatorApp:
         for d in glob.glob(os.path.join(base_dir, "PID *")):
             if os.path.isdir(d):
                 folder_name = os.path.basename(d)
-                parts = folder_name.replace("PID ", "").strip().split(" ", 1)
-                p_num = parts[0]
-                if "TEMPLATE" not in p_num.upper():
-                    u_name = ""
-                    if len(parts) > 1 and parts[1].startswith("(") and parts[1].endswith(")"):
-                        u_name = parts[1][1:-1]
-                    mtime = get_dir_mtime(d)
-                    pid_folders.append((mtime, p_num, u_name))
+                raw_name = re.sub(r'^PID[\s_]*', '', folder_name).strip()
+                if "TEMPLATE" in raw_name.upper():
+                    continue
+
+                u_name = ""
+                unit_match = re.search(r'\(([^)]+)\)', raw_name)
+                if unit_match:
+                    u_name = unit_match.group(1).strip()
+                    p_num = raw_name[:unit_match.start()].strip()
+                else:
+                    p_num = raw_name
+
+                mtime = get_dir_mtime(d)
+                pid_folders.append((mtime, p_num, u_name))
 
         # Sort descending by latest modified time (most recently worked on first)
         pid_folders.sort(key=lambda x: x[0], reverse=True)
@@ -508,14 +514,20 @@ class AutomatorApp:
         for d in glob.glob(os.path.join(base_dir, "PID *")):
             if os.path.isdir(d):
                 folder_name = os.path.basename(d)
-                parts = folder_name.replace("PID ", "").strip().split(" ", 1)
-                p_num = parts[0]
-                if "TEMPLATE" not in p_num.upper():
-                    u_name = ""
-                    if len(parts) > 1 and parts[1].startswith("(") and parts[1].endswith(")"):
-                        u_name = parts[1][1:-1]
-                    mtime = get_dir_mtime(d)
-                    pid_folders.append((mtime, p_num, u_name))
+                raw_name = re.sub(r'^PID[\s_]*', '', folder_name).strip()
+                if "TEMPLATE" in raw_name.upper():
+                    continue
+
+                u_name = ""
+                unit_match = re.search(r'\(([^)]+)\)', raw_name)
+                if unit_match:
+                    u_name = unit_match.group(1).strip()
+                    p_num = raw_name[:unit_match.start()].strip()
+                else:
+                    p_num = raw_name
+
+                mtime = get_dir_mtime(d)
+                pid_folders.append((mtime, p_num, u_name))
 
         pid_folders.sort(key=lambda x: x[0], reverse=True)
         recent_parcels = []
@@ -535,9 +547,18 @@ class AutomatorApp:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         unit_name = self.unit_entry.get().strip() if hasattr(self, 'unit_entry') else ""
         
+        # 1. Exact match for PID <parcel_num> (e.g. PID 42-00124.000 TEST or PID 42-00124.000)
+        exact_path = os.path.join(base_dir, f"PID {parcel_num}")
+        if os.path.isdir(exact_path):
+            return exact_path
+
+        # 2. Match with unit name if present
         if unit_name:
-            return os.path.join(base_dir, f"PID {parcel_num} ({unit_name})")
+            unit_path = os.path.join(base_dir, f"PID {parcel_num} ({unit_name})")
+            if os.path.isdir(unit_path):
+                return unit_path
             
+        # 3. Fallback prefix glob
         import glob
         for d in glob.glob(os.path.join(base_dir, f"PID {parcel_num}*")):
             if os.path.isdir(d):
