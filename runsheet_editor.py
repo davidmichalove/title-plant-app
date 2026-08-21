@@ -26,7 +26,7 @@ class ToolTip:
         max_len = max([len(line) for line in text.split("\n")]) if text else 0
         wrap_length = 500 if max_len > 60 else 0
         
-        label = tk.Label(self.tip_window, text=text, background="#ffffe0", foreground="black", relief=tk.SOLID, borderwidth=1, font=("Helvetica", 14), justify=tk.LEFT, wraplength=wrap_length)
+        label = tk.Label(self.tip_window, text=text, background="#ffffe0", foreground="black", relief=tk.SOLID, borderwidth=1, font=("Helvetica", 16), justify=tk.LEFT, wraplength=wrap_length)
         label.pack(ipadx=4, ipady=4)
 
     def hide_tip(self):
@@ -137,12 +137,12 @@ class RunsheetEditorWindow(tk.Toplevel):
         left_frame = ttk.Frame(paned)
         paned.add(left_frame, weight=0)
         
-        ttk.Label(left_frame, text="Rows", font=("Helvetica", 14, "bold")).pack(anchor=tk.W)
+        ttk.Label(left_frame, text="Rows", font=("Helvetica", 16, "bold")).pack(anchor=tk.W)
         
         list_frame = ttk.Frame(left_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
         
-        self.listbox = tk.Listbox(list_frame, width=40, font=("Helvetica", 14), exportselection=False)
+        self.listbox = tk.Listbox(list_frame, width=40, font=("Helvetica", 16), exportselection=False)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
@@ -175,7 +175,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         top_bar = ttk.Frame(header_area)
         top_bar.pack(fill=tk.X)
         
-        ttk.Label(top_bar, text=os.path.basename(self.excel_path), font=("Helvetica", 16, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top_bar, text=os.path.basename(self.excel_path), font=("Helvetica", 18, "bold")).pack(side=tk.LEFT)
         self.save_btn = ttk.Button(top_bar, text="Save Current Row", command=self.save_row, state="disabled")
         self.save_btn.pack(side=tk.RIGHT)
         self.ogl_btn = ttk.Button(top_bar, text="OGL Form", command=self.open_ogl_form)
@@ -646,7 +646,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                 self.release_entry.bind("<FocusIn>", on_focus_in)
                 self.release_entry.bind("<FocusOut>", on_focus_out)
             
-        self.warning_label = tk.Label(self.form_frame, text="", font=("Helvetica", 14, "bold"), fg="red", bg="#ffeeee", justify=tk.LEFT, anchor="w")
+        self.warning_label = tk.Label(self.form_frame, text="", font=("Helvetica", 16, "bold"), fg="red", bg="#ffeeee", justify=tk.LEFT, anchor="w")
         self.warning_label.pack(fill=tk.X, pady=(0, 10), padx=5)
         
         self.warning_tooltip = ToolTip(self.warning_label)
@@ -669,18 +669,18 @@ class RunsheetEditorWindow(tk.Toplevel):
             frame = ttk.Frame(self.form_frame)
             frame.pack(fill=tk.X, pady=5)
             
-            lbl = tk.Label(frame, text=header, width=20, anchor=tk.NW, font=("Helvetica", 14, "bold"), fg="systemTextColor", cursor="arrow")
+            lbl = tk.Label(frame, text=header, width=20, anchor=tk.NW, font=("Helvetica", 16, "bold"), fg="systemTextColor", cursor="arrow")
             lbl.pack(side=tk.LEFT, anchor=tk.NW)
             self.label_widgets_by_col[i] = lbl
             
             if i < 4 or header.lower() in ['acreage', 'instrument number', 'filing date', 'effective date']:
-                widget = ttk.Entry(frame, font=("Helvetica", 14))
+                widget = ttk.Entry(frame, font=("Helvetica", 16))
                 widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             else:
                 text_container = ttk.Frame(frame)
                 text_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 
-                widget = tk.Text(text_container, height=4, font=("Helvetica", 14), wrap=tk.WORD, undo=True, maxundo=-1, autoseparators=True)
+                widget = tk.Text(text_container, height=4, font=("Helvetica", 16), wrap=tk.WORD, undo=True, maxundo=-1, autoseparators=True)
                 widget.pack(side=tk.TOP, fill=tk.X, expand=True)
                 
                 # Undo/Redo Bindings
@@ -718,7 +718,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                 grip.bind("<B1-Motion>", do_resize)
                 
                 widget.bind("<Tab>", self.focus_next_widget)
-                widget.tag_configure("bold", font=("Helvetica", 14, "bold"))
+                widget.tag_configure("bold", font=("Helvetica", 16, "bold"))
                 widget.bind("<Command-b>", self.toggle_bold)
                 widget.bind("<Control-b>", self.toggle_bold)
                 
@@ -2577,11 +2577,11 @@ class RunsheetEditorWindow(tk.Toplevel):
                 book = book.strip().upper()
                 if not book:
                     book = 'OR' # Default to OR if no prefix is provided
-                return f'Release: {book} {vol}/{pg}'
+                return f'Releases mortgage recorded in {book} {vol}/{pg}'
             txt = re.sub(r'Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?(?:VOL(?:UME)?\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s]*(?:PAGE\s*|PG\s*)?(\d+)', format_released, txt, flags=re.IGNORECASE)
-            txt = re.sub(r'([^\n\u200B])\s*(Release:)', r'\1\n\2', txt)
-            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
-            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
+            txt = re.sub(r'([^\n\u200B])\s*(Releases mortgage recorded in)', r'\1\n\2', txt)
+            txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
+            txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
             # Append Original Notes block if new
             if not is_already_formatted and txt != raw_original:
@@ -2649,7 +2649,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         list_frame = ttk.Frame(popup)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        listbox = tk.Listbox(list_frame, font=("Helvetica", 14), exportselection=False)
+        listbox = tk.Listbox(list_frame, font=("Helvetica", 16), exportselection=False)
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
@@ -2707,7 +2707,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         add_frame = ttk.Frame(popup)
         add_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        new_entry = tk.Text(add_frame, font=("Helvetica", 12), height=4, wrap=tk.WORD, undo=True, maxundo=-1, autoseparators=True)
+        new_entry = tk.Text(add_frame, font=("Helvetica", 14), height=4, wrap=tk.WORD, undo=True, maxundo=-1, autoseparators=True)
         new_entry.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         def add_phrase():
