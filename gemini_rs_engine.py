@@ -83,15 +83,19 @@ def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, parcel_dir=No
         return None, f"PDF file not found: {pdf_path}"
 
     row_meta = row_meta or {}
-    meta_info = ""
-    if row_meta:
-        meta_info = f"""
-Draft Runsheet Metadata:
+    existing_notes = str(row_meta.get('notes', '')).strip()
+    meta_info = f"""
+DRAFT RUNSHEET METADATA & PRE-EXISTING COMMENTS:
 - Preliminary Instrument: {row_meta.get('instrument', '')}
 - Book/Vol/Pg: {row_meta.get('vol', '')}/{row_meta.get('pg', '')}
 - Grantor: {row_meta.get('grantor', '')}
 - Grantee: {row_meta.get('grantee', '')}
-- Preliminary Raw Notes: {row_meta.get('notes', '')}
+- Existing Runsheet Comments: "{existing_notes}"
+
+CRITICAL INSTRUCTION ON EXISTING COMMENTS:
+Carefully read and take into account the existing comments above (which originate from the initial runsheet, Phase 1 transformations, or title examiner notes).
+- Incorporate and cross-verify all accurate factual details from the existing comment (e.g. probate case numbers, release references, death dates, specific lot/tract designations, or loan terms).
+- Refine and distill them into the strict, succinct 2-4 line SOP format.
 """
 
     subject_land = ""
