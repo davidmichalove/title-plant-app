@@ -119,16 +119,15 @@ class RunsheetEditorWindow(tk.Toplevel):
         try:
             self.wb = openpyxl.load_workbook(self.excel_path, rich_text=True)
             self.ws = self.wb.active
+            self.headers = []
+            for cell in self.ws[2]:
+                self.headers.append(str(cell.value) if cell.value else f"Col {cell.column}")
             self.cleanup_messy_dates()
             self.initial_format_all_comments()
         except Exception as e:
             messagebox.showerror("Error", f"Could not open Runsheet:\n{e}", parent=self)
             self.destroy()
             return
-            
-        self.headers = []
-        for cell in self.ws[2]:
-            self.headers.append(str(cell.value) if cell.value else f"Col {cell.column}")
             
         self.current_row_idx = None
         self.widgets_by_col = {}
