@@ -207,6 +207,9 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.reformat_btn = ttk.Button(bottom_bar, text="Reformat Comments", command=self.confirm_and_reformat_all)
         self.reformat_btn.pack(side=tk.LEFT, padx=(10, 0))
         
+        self.shortcuts_btn = ttk.Button(bottom_bar, text="⌨️ Shortcuts", command=self.show_shortcuts_dialog)
+        self.shortcuts_btn.pack(side=tk.RIGHT)
+        
         self.canvas = tk.Canvas(right_container)
         v_scroll = ttk.Scrollbar(right_container, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=v_scroll.set)
@@ -2838,6 +2841,48 @@ class RunsheetEditorWindow(tk.Toplevel):
                     widget.insert(tk.INSERT, phrase)
                 except Exception: pass
         return "break"
+
+    def show_shortcuts_dialog(self):
+        popup = tk.Toplevel(self)
+        popup.title("Keyboard Shortcuts")
+        popup.geometry("560x450")
+        popup.attributes("-topmost", True)
+        popup.resizable(False, False)
+        
+        main_frame = ttk.Frame(popup, padding=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="⌨️ Keyboard Shortcuts Cheat Sheet", font=("Helvetica", 16, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        
+        shortcuts = [
+            ("Ctrl + S / Cmd + S", "Save current row"),
+            ("Ctrl + P / Cmd + P", "Set status to 'In Progress'"),
+            ("Ctrl + N / Cmd + N", "Convert selection or field to Title Case"),
+            ("Ctrl + L / Cmd + L", "Open Phrase Library window"),
+            ("Ctrl + 1 .. 9, 0", "Insert Phrase #1 through #10 at cursor"),
+            ("Ctrl + ↑ / Ctrl + ↓", "Save & jump to Previous / Next Row"),
+            ("Alt + ↑ / Alt + ↓", "Save & jump to Previous / Next Row"),
+            ("↑ / ↓ (in listbox)", "Quick select & load row into editor"),
+            ("Ctrl + B / Cmd + B", "Toggle bold on selected text"),
+            ("Left-Click Link", "Save current row & jump to referenced row"),
+            ("Right-Click Link", "Open referenced PDF Document")
+        ]
+        
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        tree = ttk.Treeview(tree_frame, columns=("shortcut", "action"), show="headings", height=11)
+        tree.heading("shortcut", text="Shortcut Key")
+        tree.heading("action", text="Action / Description")
+        tree.column("shortcut", width=180, anchor=tk.W)
+        tree.column("action", width=340, anchor=tk.W)
+        
+        for sc, act in shortcuts:
+            tree.insert("", tk.END, values=(sc, act))
+            
+        tree.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Button(main_frame, text="Close", command=popup.destroy).pack(pady=(10, 0), anchor=tk.E)
 
     def open_phrase_library(self):
         import json
