@@ -118,6 +118,7 @@ class RunsheetEditorWindow(tk.Toplevel):
             self.wb = openpyxl.load_workbook(self.excel_path, rich_text=True)
             self.ws = self.wb.active
             self.cleanup_messy_dates()
+            self.initial_format_all_comments()
         except Exception as e:
             messagebox.showerror("Error", f"Could not open Runsheet:\n{e}", parent=self)
             self.destroy()
@@ -791,9 +792,6 @@ class RunsheetEditorWindow(tk.Toplevel):
             val = row_cells[i].value if i < len(row_cells) else ""
             header_name = self.headers[i].lower()
             
-            def format_text(txt):
-                return self.format_cell_text(header_name, txt)
-            
             if isinstance(widget, ttk.Entry):
                 widget.bind("<Button-2>", self.show_context_menu)
                 widget.bind("<Button-3>", self.show_context_menu)
@@ -804,7 +802,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                 elif "acreage" in header_name and isinstance(val, (int, float)):
                     val = f"{val:.6f}"
                 else:
-                    val = format_text(str(val) if val is not None else "")
+                    val = str(val) if val is not None else ""
                 
                 if "date" in header_name:
                     if isinstance(val, str) and len(val) > 20 and "GMT" in val:
@@ -840,15 +838,15 @@ class RunsheetEditorWindow(tk.Toplevel):
                 if isinstance(val, CellRichText):
                     for part in val:
                         if isinstance(part, str):
-                            insert_parsed_text(widget, format_text(part))
+                            insert_parsed_text(widget, part)
                         else:
                             font_is_bold = part.font and part.font.b
-                            insert_parsed_text(widget, format_text(part.text), base_bold=font_is_bold)
+                            insert_parsed_text(widget, part.text, base_bold=font_is_bold)
                 else:
                     if isinstance(val, datetime.datetime):
                         val = val.strftime("%m/%d/%Y")
                     else:
-                        val = format_text(str(val) if val is not None else "")
+                        val = str(val) if val is not None else ""
                     insert_parsed_text(widget, val)
                 try:
                     widget.edit_reset()
@@ -2380,6 +2378,191 @@ class RunsheetEditorWindow(tk.Toplevel):
         else:
             messagebox.showwarning("Not Found", f"Could not find a Document for {book_type} {vol}/{page} in {os.path.basename(self.pid_dir)}", parent=self)
 
+    def initial_format_all_comments(self):
+        # Run one-time initial formatting on raw comments in unformatted rows
+        comments_col = None
+        for i, h in enumerate(self.headers):
+            if "comment" in str(h).lower() or "note" in str(h).lower():
+                comments_col = i + 1
+                break
+        if not comments_col:
+            return
+            
+        changed = False
+        for row_idx in range(3, self.ws.max_row + 1):
+            cell = self.ws.cell(row=row_idx, column=comments_col)
+            val = cell.value
+            if not val:
+                continue
+                
+            if type(val).__name__ == 'CellRichText':
+                txt = "".join(str(p) for p in val)
+            else:
+                txt = str(val)
+                
+            # If already has the Original block or marker, skip
+            if "\u200B" in txt or "--- Original ---" in txt:
+                continue
+                
+            inst_type = str(self.ws.cell(row=row_idx, column=1).value or "").lower()
+            formatted_txt = self.apply_initial_formatting_pipeline(txt, inst_type)
+            if formatted_txt != txt:
+                parts = self._parse_bold_tokens(formatted_txt)
+                if not any(isinstance(p, TextBlock) for p in parts):
+                    cell.value = "".join(parts).strip()
+                else:
+                    cell.value = CellRichText(*parts)
+                changed = True
+                
+        if changed:
+            try:
+                self.wb.save(self.excel_path)
+            except Exception as e:
+                print(f"Failed to save initially formatted comments: {e}")
+
+    def _parse_bold_tokens(self, text):
+        parts = []
+        is_bold_context = False
+        import re
+        from openpyxl.cell.rich_text import TextBlock, CellRichText
+        from openpyxl.cell.text import InlineFont
+        token_splits = re.split(r'(\[\[BOLD_START\]\]|\[\[BOLD_END\]\])', text)
+        for token in token_splits:
+            if token == '[[BOLD_START]]':
+                is_bold_context = True
+            elif token == '[[BOLD_END]]':
+                is_bold_context = False
+            elif token:
+                if is_bold_context:
+                    parts.append(TextBlock(InlineFont(b=True), token))
+                else:
+                    parts.append(token)
+        return parts
+
+    def apply_initial_formatting_pipeline(self, txt, inst_type=""):
+        import re
+        raw_original = txt
+        prior_ref_str = ""
+        txt = re.sub(r'Prior\s*deed\s*references?:?', 'Prior Ref:', txt, flags=re.IGNORECASE)
+        txt = re.sub(r'Prior\s*references?:?', 'Prior Ref:', txt, flags=re.IGNORECASE)
+
+        # Extract Prior Ref
+        prior_ref_match = re.search(r'(Prior Ref:[^\n\.]*(?:\.|$))', txt, re.IGNORECASE)
+        if prior_ref_match:
+            prior_ref_str = prior_ref_match.group(1).strip()
+            txt = txt.replace(prior_ref_match.group(0), "").strip()
+
+        # EXCEPTING / RESERVING
+        txt = re.sub(r'(?i)\bexcepting\b', 'EXCEPTING', txt)
+        def format_reserving_oag(m):
+            sentence = m.group(0).strip()
+            sentence = re.sub(r'(?i)\breserving\b', 'RESERVING', sentence)
+            if "[[BOLD_START]]" not in sentence:
+                sentence = f"[[BOLD_START]]{sentence}[[BOLD_END]]"
+            return f"\n\n{sentence}\n\n"
+        txt = re.sub(r'(?i)[^.\n]*\breserving\b[^.\n]*oil\s+and\s+gas[^.\n]*(?:\.|$)', format_reserving_oag, txt)
+
+        def format_own_line(m):
+            s = m.group(1).strip()
+            return f"\n\n{s}\n\n"
+        txt = re.sub(r'(?:^|(?<=\.))\s*((?:EXCEPTING|EXCEPTIONS?|RESERVES?|RESERVATIONS?|RESERVING)\b[^.\n]*(?:\.|$))', format_own_line, txt, flags=re.IGNORECASE)
+
+        # ARTI
+        if "ARTI\n" not in txt:
+            arti_pattern = re.compile(r'(?i)(?:[^.]*?\bconvey(?:s|ed)?\b\s+)?[^.]*?all,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?right,?\s*title,?\s*(?:and|&)\s*interest[^.]*(?:\.|$)' )
+            match = arti_pattern.search(txt)
+            if match:
+                extracted = match.group(0).strip()
+                extracted = re.sub(r'(?i)\ball,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?right,?\s*title,?\s*(?:and|&)\s*interest\b', 'all right, title, and interest', extracted)
+                txt = txt.replace(match.group(0).strip(), "").strip()
+                txt = re.sub(r'^[,\.]\s*', '', txt)
+                txt = re.sub(r'\s+([,\.])', r'\1', txt)
+                txt = re.sub(r'[,;\s]+\.', '.', txt)
+                txt = re.sub(r'\.+', '.', txt)
+                txt = txt.strip()
+                if txt: txt = txt[0].upper() + txt[1:]
+                txt = f"ARTI\n{extracted}\n{txt}" if txt else f"ARTI\n{extracted}"
+
+        # AMOUNT & MATURITY
+        if "Amount: " not in txt and "Maturity Date: " not in txt:
+            amount_str = ""
+            maturity_str = ""
+            amount_match = re.search(r'(?<!Amount: )(\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', txt)
+            if amount_match:
+                amount = amount_match.group(1)
+                amount_str = f"Amount: {amount}"
+                txt = txt.replace(amount, "").strip()
+                if txt.lower().startswith("loan"):
+                    txt = txt[4:].strip()
+
+                import dateutil.parser
+                date_match = re.search(r'(?:due\s+|payable\s+on\s+|on\s+or\s+before\s+)?\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}|\d{1,2}/\d{1,2}/\d{2,4})\b', txt, re.IGNORECASE)
+                if date_match:
+                    try:
+                        dt = dateutil.parser.parse(date_match.group(1))
+                        maturity_str = f"Maturity Date: {dt.strftime('%m/%d/%Y')}"
+                        txt = txt.replace(date_match.group(0), "").strip()
+                    except:
+                        maturity_str = "Maturity Date: Not stated."
+                else:
+                    if "Maturity Date:" not in txt:
+                        maturity_str = "Maturity Date: Not stated."
+                    
+            if amount_str or maturity_str:
+                txt = re.sub(r'^[,\.]\s*', '', txt)
+                txt = re.sub(r'\s+([,\.])', r'\1', txt)
+                txt = re.sub(r'[,;\s]+\.', '.', txt)
+                txt = re.sub(r'\.+', '.', txt)
+                txt = txt.strip()
+                if txt: txt = txt[0].upper() + txt[1:]
+            
+                if txt.startswith("ARTI\n"):
+                    arti_lines = txt.split('\n')
+                    arti_part = arti_lines[0] + '\n' + arti_lines[1]
+                    rest = '\n'.join(arti_lines[2:]).strip()
+                
+                    final_parts = [arti_part, ""]
+                    if amount_str: final_parts.append(amount_str)
+                    if maturity_str: final_parts.append(maturity_str)
+                    if amount_str or maturity_str: final_parts.append("")
+                    if rest: final_parts.append(rest)
+                    txt = '\n'.join(final_parts).strip()
+                else:
+                    final_parts = []
+                    if amount_str: final_parts.append(amount_str)
+                    if maturity_str: final_parts.append(maturity_str)
+                    if amount_str or maturity_str: final_parts.append("")
+                    if txt: final_parts.append(txt)
+                    txt = '\n'.join(final_parts).strip()
+
+        # Dower
+        is_dower_applicable = ("deed" in inst_type or "mortgage" in inst_type) and "release" not in inst_type and "satisfaction" not in inst_type
+        dower_str = ""
+        if re.search(r'(?i)dower\s+(?:rights\s+)?(?:is\s+)?released', txt):
+            txt = re.sub(r'(?i)dower\s+(?:rights\s+)?(?:is\s+)?released\.?', '', txt).strip()
+            txt = re.sub(r'(?i)dower\s+mentioned\s*that\s*is\s*released\.?', '', txt).strip()
+            if is_dower_applicable:
+                dower_str = "Dower released."
+        elif re.search(r'(?i)no\s+dower|dower\s+(?:is\s+)?not\s+stated', txt):
+            txt = re.sub(r'(?i)(?:no\s+dower(?:\s+mentioned)?|dower\s+(?:is\s+)?not\s+stated)\.?', '', txt).strip()
+            if is_dower_applicable:
+                dower_str = "No dower mentioned."
+        else:
+            if is_dower_applicable:
+                dower_str = "No dower mentioned."
+
+        if dower_str:
+            txt = f"{txt}\n{dower_str}".strip()
+
+        if prior_ref_str:
+            txt = f"{txt}\n{prior_ref_str}".strip()
+
+        if txt != raw_original:
+            txt = f"{txt}\n\n--- Original ---\n{raw_original}"
+
+        txt = "\u200B" + txt
+        return txt
+
     def format_cell_text(self, header_name, txt):
         if not isinstance(txt, str):
             return txt
@@ -2391,166 +2574,11 @@ class RunsheetEditorWindow(tk.Toplevel):
         if "grantor" in header_name or "grantee" in header_name:
             txt = re.sub(r'(?i)\bhusband\s+and\s+wife\b', 'husband and wife', txt)
             txt = re.sub(r'(?i)\bhusband\s*&\s*wife\b', 'husband and wife', txt)
+            
         if "comments" in header_name:
             import re
             
-            # Save state to prevent formatting twice and to append Original block
-            is_already_formatted = "\u200B" in txt or "--- Original ---" in txt or "ARTI\n" in txt or "Amount: " in txt or "Maturity Date: " in txt
-            raw_original = txt
-            
-            if not is_already_formatted:
-                prior_ref_str = ""
-                txt = re.sub(r'Prior\s*deed\s*references?:?', 'Prior Ref:', txt, flags=re.IGNORECASE)
-                txt = re.sub(r'Prior\s*references?:?', 'Prior Ref:', txt, flags=re.IGNORECASE)
-            
-                # Extract Prior Ref so we can guarantee it is always the last line
-                prior_ref_str = ""
-                prior_ref_match = re.search(r'(Prior Ref:[^\n\.]*(?:\.|$))', txt, re.IGNORECASE)
-                if prior_ref_match:
-                    prior_ref_str = prior_ref_match.group(1).strip()
-                    txt = txt.replace(prior_ref_match.group(0), "").strip()
-                
-                txt = re.sub(r'([^\n\u200B])\s+(Prior Ref:)', r'\1\n\2', txt)
-            
-                # EXCEPTION / RESERVATION FORMATTING
-                # 1. "excepting" ALWAYS all caps
-                txt = re.sub(r'(?i)\bexcepting\b', 'EXCEPTING', txt)
-            
-                # 2. Reserving oil and gas line -> own line, bolded, RESERVING all caps
-                def format_reserving_oag(m):
-                    sentence = m.group(0).strip()
-                    sentence = re.sub(r'(?i)\breserving\b', 'RESERVING', sentence)
-                    if "[[BOLD_START]]" not in sentence:
-                        sentence = f"[[BOLD_START]]{sentence}[[BOLD_END]]"
-                    return f"\n\n{sentence}\n\n"
-                txt = re.sub(r'(?i)[^.\n]*\breserving\b[^.\n]*oil\s+and\s+gas[^.\n]*(?:\.|$)', format_reserving_oag, txt)
-            
-                # 3. Sentences starting with EXCEPTING or RESERVES etc. on their own line
-                def format_own_line(m):
-                    s = m.group(1).strip()
-                    return f"\n\n{s}\n\n"
-                txt = re.sub(r'(?:^|(?<=\.))\s*((?:EXCEPTING|EXCEPTIONS?|RESERVES?|RESERVATIONS?|RESERVING)\b[^.\n]*(?:\.|$))', format_own_line, txt, flags=re.IGNORECASE)
-
-                # ARTI FORMATTING
-                if "ARTI\n" not in txt:
-                    arti_pattern = re.compile(r'(?i)(?:[^.]*?\bconvey(?:s|ed)?\b\s+)?[^.]*?all,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?right,?\s*title,?\s*(?:and|&)\s*interest[^.]*(?:\.|$)')
-                    match = arti_pattern.search(txt)
-                    if match:
-                        extracted = match.group(0).strip()
-                        # Normalize the phrase inside the extracted sentence
-                        import re
-                        extracted = re.sub(r'(?i)\ball,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?right,?\s*title,?\s*(?:and|&)\s*interest\b', 'all right, title, and interest', extracted)
-                    
-                        txt = txt.replace(match.group(0).strip(), "").strip()
-                        # Strip any dangling spaces/punctuation left behind
-                        txt = re.sub(r'^[,\.]\s*', '', txt)
-                        import re
-                        txt = re.sub(r'\s+([,\.])', r'\1', txt)
-                        txt = re.sub(r'[,;\s]+\.', '.', txt)
-                        txt = re.sub(r'\.+', '.', txt)
-                        txt = txt.strip()
-                        if txt: txt = txt[0].upper() + txt[1:]
-                    
-                        if txt:
-                            txt = f"ARTI\n{extracted}\n{txt}"
-                        else:
-                            txt = f"ARTI\n{extracted}"
-                    
-                # AMOUNT & MATURITY FORMATTING
-                if "Amount: " not in txt and "Maturity Date: " not in txt:
-                    amount_str = ""
-                    maturity_str = ""
-                    dower_str = ""
-                
-                    amount_match = re.search(r'(?<!Amount: )(\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', txt)
-                    if amount_match:
-                        amount = amount_match.group(1)
-                        amount_str = f"Amount: {amount}"
-                        txt = txt.replace(amount, "").strip()
-                        if txt.lower().startswith("loan"):
-                            txt = txt[4:].strip()
-
-                        import dateutil.parser
-                        date_match = re.search(r'(?:due\s+|payable\s+on\s+|on\s+or\s+before\s+)?\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}|\d{1,2}/\d{1,2}/\d{2,4})\b', txt, re.IGNORECASE)
-                        if date_match:
-                            try:
-                                dt = dateutil.parser.parse(date_match.group(1))
-                                maturity_str = f"Maturity Date: {dt.strftime('%m/%d/%Y')}"
-                                txt = txt.replace(date_match.group(0), "").strip()
-                            except:
-                                maturity_str = "Maturity Date: Not stated."
-                        else:
-                            if "Maturity Date:" not in txt:
-                                maturity_str = "Maturity Date: Not stated."
-                            
-                    if amount_str or maturity_str:
-                        txt = re.sub(r'^[,\.]\s*', '', txt) # leading comma/period
-                        txt = re.sub(r'\s+([,\.])', r'\1', txt) # remove space before punctuation
-                        txt = re.sub(r'[,;\s]+\.', '.', txt) # " , ." -> "."
-                        txt = re.sub(r'\.+', '.', txt) # ".." -> "."
-                        txt = txt.strip()
-                        if txt: txt = txt[0].upper() + txt[1:]
-                    
-                        if txt.startswith("ARTI\n"):
-                            arti_lines = txt.split('\n')
-                            arti_part = arti_lines[0] + '\n' + arti_lines[1]
-                            rest = '\n'.join(arti_lines[2:]).strip()
-                        
-                            final_parts = [arti_part, ""]
-                            if amount_str: final_parts.append(amount_str)
-                            if maturity_str: final_parts.append(maturity_str)
-                            if amount_str or maturity_str: final_parts.append("")
-                            if rest: final_parts.append(rest)
-                            txt = '\n'.join(final_parts).strip()
-                        else:
-                            final_parts = []
-                            if amount_str: final_parts.append(amount_str)
-                            if maturity_str: final_parts.append(maturity_str)
-                            if amount_str or maturity_str: final_parts.append("")
-                            if txt: final_parts.append(txt)
-                            txt = '\n'.join(final_parts).strip()
-
-                # DOWER FORMATTING (Deeds & Mortgages)
-                # Unconditionally process Dower
-                dower_str = ""
-                import re
-            
-                inst_type = ""
-                try:
-                    for i, h in enumerate(self.headers):
-                        if "instrument" in h.lower():
-                            widget = self.widgets_by_col.get(i)
-                            if widget and hasattr(widget, 'get'):
-                                inst_type = widget.get().lower()
-                            break
-                except: pass
-            
-                is_dower_applicable = ("deed" in inst_type or "mortgage" in inst_type) and "release" not in inst_type and "satisfaction" not in inst_type
-            
-                if re.search(r'(?i)dower\s+(?:rights\s+)?(?:is\s+)?released', txt):
-                    txt = re.sub(r'(?i)dower\s+(?:rights\s+)?(?:is\s+)?released\.?', '', txt).strip()
-                    txt = re.sub(r'(?i)dower\s+mentioned\s*that\s*is\s*released\.?', '', txt).strip()
-                    if is_dower_applicable:
-                        dower_str = "Dower released."
-                elif re.search(r'(?i)no\s+dower|dower\s+(?:is\s+)?not\s+stated', txt):
-                    txt = re.sub(r'(?i)(?:no\s+dower(?:\s+mentioned)?|dower\s+(?:is\s+)?not\s+stated)\.?', '', txt).strip()
-                    if is_dower_applicable:
-                        dower_str = "No dower mentioned."
-                else:
-                    # If Gemini missed it entirely, unconditionally inject it for Deeds/Mortgages!
-                    if is_dower_applicable:
-                        dower_str = "No dower mentioned."
-
-                # But wait, if they typed "Dower rights released." we don't want to append it endlessly!
-                # Since we stripped it completely from the text above, appending it once is safe!
-                if dower_str:
-                    txt = f"{txt}\n{dower_str}".strip()
-                    txt = txt.replace("\n\n\n", "\n\n")
-                
-                if prior_ref_str:
-                    txt = f"{txt}\n{prior_ref_str}".strip()
-
-            # Dynamic Dower Check (Runs on every save to catch Instrument type changes)
+            # Dynamic Dower Check (Runs on save to catch Instrument type changes)
             inst_type = ""
             try:
                 for i, h in enumerate(self.headers):
@@ -2564,7 +2592,6 @@ class RunsheetEditorWindow(tk.Toplevel):
             is_dower_applicable = ("deed" in inst_type or "mortgage" in inst_type) and "release" not in inst_type and "satisfaction" not in inst_type
             text_without_original = txt.split("--- Original ---")[0]
             if is_dower_applicable and not re.search(r'(?i)dower', text_without_original):
-                # Ensure it appears before the Original block if present
                 if "--- Original ---" in txt:
                     txt = txt.replace("--- Original ---", "No dower mentioned.\n\n--- Original ---")
                 else:
@@ -2576,23 +2603,13 @@ class RunsheetEditorWindow(tk.Toplevel):
                 pg = m.group(3)
                 book = book.strip().upper()
                 if not book:
-                    book = 'OR' # Default to OR if no prefix is provided
-                
-                # Check instrument type from the UI
-                inst_type = ""
-                try:
-                    for i, h in enumerate(self.headers):
-                        if h.lower() == 'instrument':
-                            widget = self.widgets_by_col.get(i)
-                            if widget and hasattr(widget, 'get'):
-                                inst_type = widget.get().lower()
-                            break
-                except: pass
+                    book = 'OR'
                 
                 if "release" in inst_type or "satisfaction" in inst_type:
                     return f'Releases mortgage recorded in {book} {vol}/{pg}'
                 else:
                     return f'Release: {book} {vol}/{pg}'
+                    
             txt = re.sub(r'Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?(?:VOL(?:UME)?\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s]*(?:PAGE\s*|PG\s*)?(\d+)', format_released, txt, flags=re.IGNORECASE)
             txt = re.sub(r'([^\n\u200B])\s*(Releases mortgage recorded in)', r'\1\n\2', txt)
             txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
@@ -2601,36 +2618,8 @@ class RunsheetEditorWindow(tk.Toplevel):
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
-            # Append Original Notes block if new
-            if not is_already_formatted and txt != raw_original:
-                txt = f"{txt}\n\n--- Original ---\n{raw_original}"
-                
             if "\u200B" not in txt:
                 txt = "\u200B" + txt
-                
-            import glob
-            pattern = re.compile(r'(?:(?:DR|OR|MR|LR|PR|PA|WR|MISC)\s*)?Vol(?:ume|\.)?\s*(\d+),\s*Page\s*(\d+)', re.IGNORECASE)
-            
-            if pattern.search(txt):
-                all_docs = []
-                for ext in ("*.pdf", "*.txt", "*.doc", "*.docx", "*.rtf", "*.png", "*.jpg", "*.tif", "*.tiff"):
-                    all_docs.extend(glob.glob(os.path.join(self.pid_dir, "**", ext), recursive=True))
-                    all_docs.extend(glob.glob(os.path.join(self.base_dir, ext)))
-                
-                def replacer(match):
-                    vol = match.group(1)
-                    page = match.group(2)
-                    
-                    for doc in all_docs:
-                        fname = os.path.basename(doc).upper()
-                        nums = re.findall(r'\d+', fname)
-                        if vol in nums and page in nums:
-                            book_match = re.search(r'^(OR|DR|MR|LR|PA|WR|PR|MISC)', fname)
-                            if book_match:
-                                return f"{book_match.group(1)} {vol}/{page}"
-                    return match.group(0)
-                    
-                txt = pattern.sub(replacer, txt)
                 
             return txt
         return txt
