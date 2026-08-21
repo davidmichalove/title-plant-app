@@ -232,6 +232,12 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.bind("<Control-p>", self.set_status_in_progress)
         self.bind("<Command-f>", self.set_status_completed)
         self.bind("<Control-f>", self.set_status_completed)
+        self.bind("<Command-a>", self.show_ai_note_dialog)
+        self.bind("<Control-a>", self.show_ai_note_dialog)
+        self.bind("<Command-Shift-A>", self.show_ai_note_dialog)
+        self.bind("<Command-Shift-a>", self.show_ai_note_dialog)
+        self.bind("<Control-Shift-A>", self.show_ai_note_dialog)
+        self.bind("<Control-Shift-a>", self.show_ai_note_dialog)
         self.bind("<Command-d>", self.toggle_dower_reviewed)
         self.bind("<Control-d>", self.toggle_dower_reviewed)
         
@@ -2975,6 +2981,80 @@ class RunsheetEditorWindow(tk.Toplevel):
         
         self.wait_window(popup)
 
+    def show_ai_note_dialog(self, event=None):
+        if not getattr(self, 'current_row_idx', None):
+            return "break"
+            
+        popup = tk.Toplevel(self)
+        popup.title(f"Row {self.current_row_idx} - AI Note & Error Bar Details")
+        popup.geometry("640x520")
+        popup.attributes("-topmost", True)
+        popup.transient(self)
+        
+        try:
+            x = self.winfo_rootx() + (self.winfo_width() // 2) - 320
+            y = self.winfo_rooty() + (self.winfo_height() // 2) - 260
+            popup.geometry(f"+{x}+{y}")
+        except Exception: pass
+        
+        main_frame = ttk.Frame(popup, padding=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        row_title = f"Row {self.current_row_idx} Details"
+        vol = str(self.ws.cell(row=self.current_row_idx, column=3).value or "").strip()
+        pg = str(self.ws.cell(row=self.current_row_idx, column=4).value or "").strip()
+        inst = str(self.ws.cell(row=self.current_row_idx, column=1).value or "").strip()
+        if vol or pg or inst:
+            row_title += f" ({inst} {vol}/{pg})".strip()
+            
+        ttk.Label(main_frame, text=row_title, font=("Helvetica", 16, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        
+        warn_frame = ttk.LabelFrame(main_frame, text=" ⚠️ Active Warnings / Error Bar ", padding=10)
+        warn_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        warnings = getattr(self, 'row_warnings', {}).get(str(self.current_row_idx), [])
+        warn_text = getattr(self, 'warning_label', None)
+        active_error_str = warn_text.cget("text") if warn_text else ""
+        if not active_error_str:
+            if warnings:
+                active_error_str = "⚠️ " + " | ".join(warnings)
+            else:
+                active_error_str = "✅ No active errors or warnings for this row."
+                
+        lbl_err = tk.Label(warn_frame, text=active_error_str, font=("Helvetica", 14), fg="#b30000" if "⚠️" in active_error_str else "#006600", justify=tk.LEFT, anchor="w", wraplength=580)
+        lbl_err.pack(fill=tk.X)
+        
+        ai_frame = ttk.LabelFrame(main_frame, text=" 🤖 Gemini AI QC Analysis & Note ", padding=10)
+        ai_frame.pack(fill=tk.BOTH, expand=True)
+        
+        txt_box = tk.Text(ai_frame, font=("Helvetica", 14), wrap=tk.WORD)
+        txt_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        sb = ttk.Scrollbar(ai_frame, orient="vertical", command=txt_box.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        txt_box.config(yscrollcommand=sb.set)
+        
+        full_ai_content = getattr(self, 'current_ai_full_text', "").strip()
+        if not full_ai_content:
+            cache_key = f"{vol}_{pg}"
+            if hasattr(self, 'ai_qc_cache') and cache_key in self.ai_qc_cache:
+                full_ai_content = self.ai_qc_cache[cache_key].strip()
+                
+        if not full_ai_content:
+            full_ai_content = "No Gemini AI QC note cached for this document.\n(Click 'Retry AI Check' on the toolbar if you'd like Gemini to re-analyze this document)."
+            
+        txt_box.insert("1.0", full_ai_content)
+        txt_box.config(state="disabled")
+        
+        btn_close = ttk.Button(main_frame, text="Close (Esc)", command=popup.destroy)
+        btn_close.pack(pady=(10, 0), anchor=tk.E)
+        btn_close.focus_set()
+        
+        popup.bind("<Escape>", lambda e: popup.destroy())
+        popup.bind("<Return>", lambda e: popup.destroy())
+        
+        return "break"
+
     def show_shortcuts_dialog(self):
         popup = tk.Toplevel(self)
         popup.title("Keyboard Shortcuts")
@@ -2991,6 +3071,7 @@ class RunsheetEditorWindow(tk.Toplevel):
             ("Ctrl + S / Cmd + S", "Save current row"),
             ("Ctrl + P / Cmd + P", "Set status to 'In Progress'"),
             ("Ctrl + F / Cmd + F", "Set status to 'Completed'"),
+            ("Ctrl + A / Cmd + A", "View Gemini AI Note & Error Bar Details"),
             ("Ctrl + D / Cmd + D", "Toggle 'Dower Reviewed' checkbox"),
             ("Cmd+Shift+D / Cmd+Shift+O", "Delete '--- Original ---' notes block"),
             ("Ctrl + O / Cmd + O", "Open Document (PDF for current row)"),
