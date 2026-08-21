@@ -96,20 +96,42 @@ class AutomatorApp:
 
         import glob
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        recent_parcels = []
-        recent_units = []
+        
+        def get_dir_mtime(d):
+            latest = os.path.getmtime(d)
+            try:
+                for entry in os.scandir(d):
+                    if not entry.name.startswith('.'):
+                        try:
+                            m = entry.stat().st_mtime
+                            if m > latest:
+                                latest = m
+                        except Exception: pass
+            except Exception: pass
+            return latest
+
+        pid_folders = []
         for d in glob.glob(os.path.join(base_dir, "PID *")):
             if os.path.isdir(d):
                 folder_name = os.path.basename(d)
                 parts = folder_name.replace("PID ", "").strip().split(" ", 1)
                 p_num = parts[0]
                 if "TEMPLATE" not in p_num.upper():
-                    if p_num not in recent_parcels:
-                        recent_parcels.append(p_num)
-                if len(parts) > 1 and parts[1].startswith("(") and parts[1].endswith(")"):
-                    u_name = parts[1][1:-1]
-                    if u_name not in recent_units:
-                        recent_units.append(u_name)
+                    u_name = ""
+                    if len(parts) > 1 and parts[1].startswith("(") and parts[1].endswith(")"):
+                        u_name = parts[1][1:-1]
+                    mtime = get_dir_mtime(d)
+                    pid_folders.append((mtime, p_num, u_name))
+
+        # Sort descending by latest modified time (most recently worked on first)
+        pid_folders.sort(key=lambda x: x[0], reverse=True)
+        recent_parcels = []
+        recent_units = []
+        for _, p_num, u_name in pid_folders:
+            if p_num not in recent_parcels:
+                recent_parcels.append(p_num)
+            if u_name and u_name not in recent_units:
+                recent_units.append(u_name)
 
         top_header_wrapper = ttk.Frame(frame)
         top_header_wrapper.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
@@ -117,11 +139,11 @@ class AutomatorApp:
         top_header_frame.pack(anchor=tk.CENTER)
         
         ttk.Label(top_header_frame, text="Parcel Number:").pack(side=tk.LEFT)
-        self.parcel_entry = ttk.Combobox(top_header_frame, values=recent_parcels, width=15)
+        self.parcel_entry = ttk.Combobox(top_header_frame, values=recent_parcels, width=15, postcommand=self.refresh_recent_parcels)
         self.parcel_entry.pack(side=tk.LEFT, padx=(5, 20))
         
         ttk.Label(top_header_frame, text="Unit Name:").pack(side=tk.LEFT)
-        self.unit_entry = ttk.Combobox(top_header_frame, values=recent_units, width=12)
+        self.unit_entry = ttk.Combobox(top_header_frame, values=recent_units, width=12, postcommand=self.refresh_recent_parcels)
         self.unit_entry.pack(side=tk.LEFT, padx=5)
         self.unit_entry.set("")
         self.unit_entry.bind('<<ComboboxSelected>>', lambda e: self.on_parcel_change())
@@ -462,6 +484,50 @@ class AutomatorApp:
         
         self.parcel_entry.bind('<<ComboboxSelected>>', lambda e: self.on_parcel_change())
         self.parcel_entry.bind('<KeyRelease>', lambda e: self.on_parcel_change())
+
+    def refresh_recent_parcels(self):
+        import glob
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        def get_dir_mtime(d):
+            latest = os.path.getmtime(d)
+            try:
+                for entry in os.scandir(d):
+                    if not entry.name.startswith('.'):
+                        try:
+                            m = entry.stat().st_mtime
+                            if m > latest:
+                                latest = m
+                        except Exception: pass
+            except Exception: pass
+            return latest
+
+        pid_folders = []
+        for d in glob.glob(os.path.join(base_dir, "PID *")):
+            if os.path.isdir(d):
+                folder_name = os.path.basename(d)
+                parts = folder_name.replace("PID ", "").strip().split(" ", 1)
+                p_num = parts[0]
+                if "TEMPLATE" not in p_num.upper():
+                    u_name = ""
+                    if len(parts) > 1 and parts[1].startswith("(") and parts[1].endswith(")"):
+                        u_name = parts[1][1:-1]
+                    mtime = get_dir_mtime(d)
+                    pid_folders.append((mtime, p_num, u_name))
+
+        pid_folders.sort(key=lambda x: x[0], reverse=True)
+        recent_parcels = []
+        recent_units = []
+        for _, p_num, u_name in pid_folders:
+            if p_num not in recent_parcels:
+                recent_parcels.append(p_num)
+            if u_name and u_name not in recent_units:
+                recent_units.append(u_name)
+                
+        if hasattr(self, 'parcel_entry'):
+            self.parcel_entry['values'] = recent_parcels
+        if hasattr(self, 'unit_entry'):
+            self.unit_entry['values'] = recent_units
 
     def get_parcel_dir(self, parcel_num):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
