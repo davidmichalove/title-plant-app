@@ -205,6 +205,9 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.open_excel_btn = ttk.Button(bottom_bar, text="Open RS Excel", command=self.open_excel_runsheet)
         self.open_excel_btn.pack(side=tk.LEFT)
         
+        self.reformat_btn = ttk.Button(bottom_bar, text="Reformat Comments", command=self.confirm_and_reformat_all)
+        self.reformat_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
         self.canvas = tk.Canvas(right_container)
         v_scroll = ttk.Scrollbar(right_container, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=v_scroll.set)
@@ -2386,6 +2389,98 @@ class RunsheetEditorWindow(tk.Toplevel):
                 messagebox.showerror("Error", f"Failed to open Document:\n{e}", parent=self)
         else:
             messagebox.showwarning("Not Found", f"Could not find a Document for {book_type} {vol}/{page} in {os.path.basename(self.pid_dir)}", parent=self)
+
+    def confirm_and_reformat_all(self):
+        confirm = messagebox.askyesno(
+            "Reformat Comments",
+            "Do you really want to re-run the initial formatting rules on all comments?\n\n"
+            "• A timestamped backup copy of your current spreadsheet will be saved first.\n"
+            "• This will re-parse ARTI, Amount, Maturity, Dower, and re-generate the Original Notes blocks.\n\n"
+            "Do you want to proceed?",
+            parent=self
+        )
+        if not confirm:
+            return
+            
+        # 1. Create timestamped backup
+        import datetime, shutil, json
+        backups_dir = os.path.join(self.pid_dir, "BACKUPS")
+        os.makedirs(backups_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
+        backup_file = os.path.join(backups_dir, f"{base_name}_backup_{ts}.xlsx")
+        
+        try:
+            # Save current state before backing up
+            self.wb.save(self.excel_path)
+            shutil.copy2(self.excel_path, backup_file)
+        except Exception as e:
+            messagebox.showerror("Backup Error", f"Failed to create backup prior to reformatting:\n{e}", parent=self)
+            return
+
+        # 2. Force reformat all comments
+        comments_col = None
+        for i, h in enumerate(self.headers):
+            if "comment" in str(h).lower() or "note" in str(h).lower():
+                comments_col = i + 1
+                break
+                
+        if not comments_col:
+            messagebox.showwarning("Warning", "Could not find a Comments/Notes column in this sheet.", parent=self)
+            return
+
+        from openpyxl.cell.rich_text import TextBlock, CellRichText
+        changed_count = 0
+        for row_idx in range(3, self.ws.max_row + 1):
+            cell = self.ws.cell(row=row_idx, column=comments_col)
+            val = cell.value
+            if not val:
+                continue
+                
+            if type(val).__name__ == 'CellRichText':
+                txt = "".join(str(p) for p in val)
+            else:
+                txt = str(val)
+                
+            # If the user previously had an Original block, extract the original text
+            if "--- Original ---" in txt:
+                raw_text_to_parse = txt.split("--- Original ---")[1].strip()
+            else:
+                raw_text_to_parse = txt.replace("\u200B", "").strip()
+                
+            inst_type = str(self.ws.cell(row=row_idx, column=1).value or "").lower()
+            formatted_txt = self.apply_initial_formatting_pipeline(raw_text_to_parse, inst_type)
+            
+            parts = self._parse_bold_tokens(formatted_txt)
+            if not any(isinstance(p, TextBlock) for p in parts):
+                cell.value = "".join(parts).strip()
+            else:
+                cell.value = CellRichText(*parts)
+            changed_count += 1
+
+        try:
+            self.wb.save(self.excel_path)
+            if hasattr(self, 'formatted_state_file'):
+                with open(self.formatted_state_file, "w") as f:
+                    json.dump({"initial_formatting_completed": True}, f)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save reformatted spreadsheet:\n{e}", parent=self)
+            return
+            
+        # Refresh UI
+        self.load_rows()
+        if self.current_row_idx and self.current_row_idx in self.row_indices:
+            lb_idx = self.row_indices.index(self.current_row_idx)
+            self.listbox.selection_clear(0, tk.END)
+            self.listbox.selection_set(lb_idx)
+            self.on_select(None)
+            
+        messagebox.showinfo(
+            "Reformat Complete",
+            f"Successfully reformatted {changed_count} row(s)!\n\n"
+            f"Prior version backed up to:\n{os.path.basename(backup_file)}",
+            parent=self
+        )
 
     def initial_format_all_comments(self):
         # Run one-time initial formatting on raw comments in unformatted rows
