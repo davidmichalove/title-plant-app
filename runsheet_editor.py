@@ -232,6 +232,8 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.bind("<Control-p>", self.set_status_in_progress)
         self.bind("<Command-f>", self.set_status_completed)
         self.bind("<Control-f>", self.set_status_completed)
+        self.bind("<Command-d>", self.toggle_dower_reviewed)
+        self.bind("<Control-d>", self.toggle_dower_reviewed)
         self.bind("<Command-o>", lambda e: self.open_pdf_for_row())
         self.bind("<Control-o>", lambda e: self.open_pdf_for_row())
         self.bind("<Command-n>", self.convert_to_normal_case)
@@ -628,6 +630,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                             break # Only inject first found release
             
             self.warning_label.config(text=warn_text.strip())
+        self.on_dower_toggle_cb = on_dower_toggle
 
         def on_ignore_warnings_toggle():
             if not getattr(self, 'current_row_idx', None): return
@@ -2784,6 +2787,14 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.on_status_change(None)
         return "break"
 
+    def toggle_dower_reviewed(self, event=None):
+        if getattr(self, 'qc_vars', None) and len(self.qc_vars) > 0:
+            current_val = self.qc_vars[0].get()
+            self.qc_vars[0].set(not current_val)
+            if hasattr(self, 'on_dower_toggle_cb') and callable(self.on_dower_toggle_cb):
+                self.on_dower_toggle_cb()
+        return "break"
+
     def convert_to_normal_case(self, event=None):
         widget = self.focus_get()
         if isinstance(widget, tk.Text):
@@ -2867,6 +2878,7 @@ class RunsheetEditorWindow(tk.Toplevel):
             ("Ctrl + S / Cmd + S", "Save current row"),
             ("Ctrl + P / Cmd + P", "Set status to 'In Progress'"),
             ("Ctrl + F / Cmd + F", "Set status to 'Completed'"),
+            ("Ctrl + D / Cmd + D", "Toggle 'Dower Reviewed' checkbox"),
             ("Ctrl + O / Cmd + O", "Open Document (PDF for current row)"),
             ("Ctrl + N / Cmd + N", "Convert selection or field to Title Case"),
             ("Ctrl + L / Cmd + L", "Open Phrase Library window"),
