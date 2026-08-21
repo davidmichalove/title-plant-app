@@ -25,54 +25,11 @@ def get_api_key():
                 pass
     return ""
 
-def load_sop_examples():
-    """Extract gold standard few-shot examples from Gemini_SOPs."""
-    examples = []
-    rs_dir = os.path.join(SOP_DIR, "EXAMPLES", "RS Examples")
-    if not os.path.exists(rs_dir):
-        return ""
-
-    import glob
-    for f in glob.glob(os.path.join(rs_dir, "*.xlsx")):
-        try:
-            wb = openpyxl.load_workbook(f, data_only=True)
-            ws = wb.active
-            headers = [str(cell.value or "").strip() for cell in ws[2]]
-            comm_col = None
-            for idx, h in enumerate(headers, 1):
-                if "comment" in h.lower() or "note" in h.lower():
-                    comm_col = idx
-                    break
-            if not comm_col:
-                continue
-
-            for r in range(3, min(10, ws.max_row + 1)):
-                inst = ws.cell(row=r, column=1).value
-                vol = ws.cell(row=r, column=3).value
-                pg = ws.cell(row=r, column=4).value
-                comm = ws.cell(row=r, column=comm_col).value
-                if inst and comm and len(str(comm).strip()) > 10:
-                    examples.append({
-                        "instrument": str(inst).strip(),
-                        "vol_pg": f"{vol}/{pg}",
-                        "sample_comment": str(comm).strip()
-                    })
-                if len(examples) >= 8:
-                    break
-        except Exception:
-            pass
-        if len(examples) >= 8:
-            break
-
-    ex_text = "GOLD-STANDARD TITLE COMMENT EXAMPLES FROM CLIENT SOPS:\n"
-    for ex in examples:
-        ex_text += f"\n--- Example: {ex['instrument']} ({ex['vol_pg']}) ---\n{ex['sample_comment']}\n"
-    return ex_text
-
 def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, model="gemini-3.6-flash"):
     """
     Analyzes a single document PDF with Gemini vision.
-    Extracts structured Runsheet data, standard SOP comments, and deep source provenance.
+    Generates an ultra-succinct, pared-down, client-ready Runsheet Comment (2-4 lines max)
+    and stores rich quotes, page numbers, and reasoning in source_provenance.
     """
     if not api_key:
         return None, "No Gemini API key provided."
@@ -83,35 +40,67 @@ def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, model="gemini
     meta_info = ""
     if row_meta:
         meta_info = f"""
-        Draft Metadata from Preliminary Runsheet:
-        - Instrument: {row_meta.get('instrument', '')}
-        - Book/Vol/Pg: {row_meta.get('book', '')} {row_meta.get('vol', '')}/{row_meta.get('pg', '')}
-        - Grantor: {row_meta.get('grantor', '')}
-        - Grantee: {row_meta.get('grantee', '')}
-        - Preliminary Notes: {row_meta.get('notes', '')}
-        """
-
-    few_shot_sop = load_sop_examples()
+Draft Runsheet Metadata:
+- Preliminary Instrument: {row_meta.get('instrument', '')}
+- Book/Vol/Pg: {row_meta.get('vol', '')}/{row_meta.get('pg', '')}
+- Grantor: {row_meta.get('grantor', '')}
+- Grantee: {row_meta.get('grantee', '')}
+- Preliminary Raw Notes: {row_meta.get('notes', '')}
+"""
 
     system_prompt = f"""
-You are an expert Ohio Real Estate Title Examiner working under strict Belmont County, Ohio standards and Gulfport Energy client SOPs.
-Your goal is to inspect this recorded instrument and generate a client-ready Runsheet entry.
+You are an expert Ohio Title Examiner following strict Gulfport Energy & Belmont County Runsheet standards.
+Your output comment MUST BE EXTREMELY SUCCINCT, PARED-DOWN, AND BRIEF (2 to 4 lines maximum).
 
-{few_shot_sop}
+REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
+- Standard Warranty Deed:
+  ARTI
+  No dower mentioned
+  Prior Ref: DR 372/194
 
-STRICT ANTI-HALLUCINATION & ACCURACY RULES:
-1. ZERO HALLUCINATIONS: Do not guess, assume, or fabricate any data. If a date, amount, or reference is not stated in the document, output "Not stated" or omit it.
-2. VISUAL HIGHLIGHTS: Scan the pages for yellow or colored highlight marks. The highlighted text explicitly identifies the SUBJECT TRACT(S), key lot numbers, dower status, and crucial reservations.
-3. COMMENT FORMATTING RULES:
-   - Conveyance Header: For Deeds, begin with "ARTI\\n" (All Right, Title, and Interest) if conveying all interest, followed by the specific lot/tract conveyed.
-   - Dower: For deeds, state "Dower released." if spouse releases dower/homestead. State "No dower mentioned." if grantor is single, unmarried, or no dower clause exists.
-   - Oil & Gas Reservations: If any Oil & Gas, minerals, or royalties are EXCEPTED or RESERVED, wrap the entire reservation sentence in [[BOLD_START]]...[[BOLD_END]].
-   - Mortgages & Releases:
-     - For Mortgage rows: Include "Amount: $X", "Maturity Date: X" (or "Not stated"). If a release reference is visible, note "Release: OR X/Y".
-     - For Release rows: State "Releases mortgage recorded in [Book] [Vol]/[Pg]".
-   - Prior References: State "Prior Ref: [Book] [Vol]/[Pg]" or case number.
-4. SOURCE PROVENANCE (TRACEABILITY):
-   For each major fact (Subject Tract, Dower, Reservations, Prior Ref), cite the exact page number, the exact verbatim quote from the PDF, and your legal reasoning.
+- Warranty Deed with Dower:
+  ARTI
+  Dower released
+  Prior Ref: DR 472/690
+
+- Fractional Deed (e.g. 1/2 or 1/4 interest):
+  Undivided 1/2 interest
+  Dower released
+  Prior Ref: DR 362/222
+
+- Deed with Mineral / Oil & Gas Exception or Life Estate:
+  ARTI
+  [[BOLD_START]]EXCEPTING all oil and gas rights.[[BOLD_END]]
+  No dower mentioned
+  Prior Ref: DR 500/100
+
+- Mortgage:
+  Amount: $12,946.66
+  Maturity Date: Not stated
+  Release: MR 107/710
+
+- Release of Mortgage:
+  Releases mortgage recorded in MR 988/778
+
+- Oil & Gas Lease / Memo:
+  PT 5 yrs
+  OTE 5 yrs
+  Royalty: Not stated
+  Prior Ref: OR 145/891
+
+- Affidavit / Probate:
+  Affiant is the daughter of Charles W. McLaughlin (DOD 10/26/2023).
+  Terminates life estate reserved at OR 145/891.
+  Death Certificate Attached.
+  Prior Ref: OR 145/891
+
+STRICT RULES FOR THE "comments" FIELD:
+1. EXTREME BREVITY: Do NOT dump legal descriptions, lot numbers lists, or narrative paragraphs. Keep the "comments" field strictly to 2-4 lines using the exact keywords above.
+2. CONVEYANCE: Use "ARTI" for fee simple conveyance, or state fractional interest (e.g. "Undivided 1/2 interest").
+3. DOWER: Strictly "Dower released" or "No dower mentioned" or "Dower not stated".
+4. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
+5. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
+6. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
 
 {meta_info}
 
@@ -125,17 +114,16 @@ Return a STRICT JSON object with this exact structure:
   "filing_date": "MM/DD/YYYY",
   "grantor": "...",
   "grantee": "...",
-  "acreage": "...",
   "conveyance": "Fee Simple",
-  "comments": "ARTI\\nConveys Lot 142 of the Shoe Factory Addition by general warranty.\\n\\nNo dower mentioned.\\n\\nPrior Ref: DR 362/222",
+  "comments": "ARTI\\nDower released\\nPrior Ref: DR 362/222",
   "source_provenance": {{
-    "subject_tract_quote": "Exact verbatim quote from PDF of description",
+    "subject_tract_quote": "Verbatim quote of tract from PDF",
     "subject_tract_page": 1,
     "highlight_found": true,
     "highlight_description": "Description of what was highlighted on page X",
     "dower_quote": "Verbatim quote or 'N/A - Grantor executed as single'",
     "dower_page": 2,
-    "reservations_quote": "Verbatim quote of any reservation or 'None'",
+    "reservations_quote": "Verbatim quote of reservation or 'None'",
     "reservations_page": 1,
     "prior_ref_quote": "Verbatim quote of prior deed reference or 'None'",
     "prior_ref_page": 1,
