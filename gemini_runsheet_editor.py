@@ -33,6 +33,34 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
         self.bind("<Command-g>", lambda e: self.draft_current_row_with_gemini())
         self.bind("<Control-g>", lambda e: self.draft_current_row_with_gemini())
 
+    def delete_original_block(self, event=None):
+        """Removes both --- Gemini Draft --- and --- Original --- blocks."""
+        comments_widget = None
+        for i, h in enumerate(self.headers):
+            if "comment" in h.lower() or "note" in h.lower():
+                w = self.widgets_by_col.get(i)
+                if isinstance(w, tk.Text):
+                    comments_widget = w
+                break
+
+        focus_w = self.focus_get()
+        target_w = focus_w if isinstance(focus_w, tk.Text) else comments_widget
+
+        if target_w and isinstance(target_w, tk.Text):
+            txt = target_w.get("1.0", "end-1c")
+            cleaned_txt = txt
+            if "--- Gemini Draft ---" in cleaned_txt:
+                cleaned_txt = cleaned_txt.split("--- Gemini Draft ---")[0].rstrip()
+            elif "--- Original ---" in cleaned_txt:
+                cleaned_txt = cleaned_txt.split("--- Original ---")[0].rstrip()
+
+            target_w.delete("1.0", tk.END)
+            target_w.insert("1.0", cleaned_txt)
+            self.perform_spellcheck(target_w)
+            self.highlight_links(target_w)
+
+        return "break"
+
     def show_ai_note_dialog(self, event=None):
         """Enhanced Cmd+A dialog showing full Gemini Source Provenance & Quotes."""
         if not getattr(self, 'current_row_idx', None):
@@ -132,7 +160,7 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
         return "break"
 
     def draft_current_row_with_gemini(self):
-        """Runs Gemini on the active row's PDF and injects results into form."""
+        """Runs Gemini on the active row's PDF and formats comparative draft blocks."""
         if not getattr(self, 'current_row_idx', None):
             messagebox.showinfo("Select Row", "Please select a row first.", parent=self)
             return
@@ -159,7 +187,7 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
             return
 
         # Show status
-        self.warning_label.config(text="🤖 Gemini is reading document and visual highlights...")
+        self.warning_label.config(text="🤖 Gemini is reading document with subject land context...")
         self.update_idletasks()
 
         def worker():
@@ -171,7 +199,7 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
                 "grantee": str(self.ws.cell(row=self.current_row_idx, column=9).value or ""),
                 "notes": str(self.ws.cell(row=self.current_row_idx, column=12).value or "")
             }
-            res_data, err = gemini_rs_engine.analyze_document_with_gemini(api_key, target_pdf, row_meta)
+            res_data, err = gemini_rs_engine.analyze_document_with_gemini(api_key, target_pdf, row_meta, parcel_dir=self.pid_dir)
 
             def apply_res():
                 if err or not res_data:
@@ -179,15 +207,34 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
                     self.warning_label.config(text="")
                     return
 
-                # Update Comments Text Widget
+                gemini_comment = res_data.get("comments", "").strip()
+
+                # Update Comments Text Widget with Comparative Sections
                 for i, h in enumerate(self.headers):
                     if "comment" in h.lower() or "note" in h.lower():
                         w = self.widgets_by_col.get(i)
-                        if isinstance(w, tk.Text) and res_data.get("comments"):
+                        if isinstance(w, tk.Text):
+                            current_text = w.get("1.0", "end-1c").strip()
+                            
+                            # Extract previous original note if present
+                            original_note = ""
+                            if "--- Original ---" in current_text:
+                                original_note = current_text.split("--- Original ---")[1].strip()
+                            elif "--- Gemini Draft ---" in current_text:
+                                original_note = current_text.split("--- Gemini Draft ---")[0].strip()
+                            else:
+                                original_note = current_text
+
+                            # Build formatted comparative output
+                            formatted_output = f"{gemini_comment}\n\n--- Gemini Draft ---\n{gemini_comment}"
+                            if original_note and original_note != gemini_comment:
+                                formatted_output += f"\n\n--- Original ---\n{original_note}"
+
                             w.delete("1.0", tk.END)
-                            w.insert("1.0", res_data["comments"])
+                            w.insert("1.0", formatted_output)
                             self.perform_spellcheck(w)
                             self.highlight_links(w)
+
                     elif "conveyance" in h.lower():
                         w = self.widgets_by_col.get(i)
                         if isinstance(w, ttk.Entry) and res_data.get("conveyance"):
@@ -201,7 +248,7 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
                 with open(self.provenance_file, "w") as f:
                     json.dump(self.provenance_data, f, indent=4)
 
-                self.warning_label.config(text=f"✨ Gemini comment drafted! Press Cmd+A to view source quotes and reasoning.")
+                self.warning_label.config(text=f"✨ Gemini draft loaded! Press Cmd+A to view source quotes and reasoning.")
 
             self.after(0, apply_res)
 

@@ -3,6 +3,7 @@ import json
 import re
 import traceback
 import openpyxl
+import fitz # PyMuPDF
 from google import genai
 
 SOP_DIR = "/Volumes/davidlls/Gemini_SOPs"
@@ -25,11 +26,61 @@ def get_api_key():
                 pass
     return ""
 
-def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, model="gemini-3.6-flash"):
+def get_subject_land_context(parcel_dir):
+    """
+    Extracts the exact target subject land description, parcel number,
+    and owner from the TAX/ property cards in the parcel folder.
+    """
+    tax_dir = os.path.join(parcel_dir, "TAX")
+    subject_info = []
+    
+    if os.path.exists(tax_dir):
+        for fn in os.listdir(tax_dir):
+            if fn.endswith(".pdf") and ("property card" in fn.lower() or "tax card" in fn.lower()):
+                p = os.path.join(tax_dir, fn)
+                try:
+                    doc = fitz.open(p)
+                    txt = ""
+                    for page in doc:
+                        txt += page.get_text() + "\n"
+                    
+                    # Extract Legal Description
+                    legal_m = re.search(r'Legal\s+Description\s*\n+([^\n]+)', txt, re.IGNORECASE)
+                    if legal_m:
+                        subject_info.append(f"Legal Description: {legal_m.group(1).strip()}")
+                    
+                    # Extract Parcel Number
+                    p_num_m = re.search(r'Parcel\s+Number\s*\n+([^\n]+)', txt, re.IGNORECASE)
+                    if p_num_m:
+                        subject_info.append(f"Parcel Number: {p_num_m.group(1).strip()}")
+                        
+                    # Extract Owner / Deeded Name
+                    owner_m = re.search(r'Deeded\s+Name\s*\n+([^\n]+)', txt, re.IGNORECASE)
+                    if owner_m:
+                        subject_info.append(f"Current Record Owner: {owner_m.group(1).strip()}")
+                        
+                    # Extract Tax District
+                    dist_m = re.search(r'Tax\s+District\s*\n+([^\n]+)', txt, re.IGNORECASE)
+                    if dist_m:
+                        subject_info.append(f"Tax District: {dist_m.group(1).strip()}")
+                        
+                    if subject_info:
+                        break
+                except Exception:
+                    pass
+
+    if not subject_info:
+        # Fallback to folder name
+        folder_name = os.path.basename(parcel_dir).replace("PID ", "").strip()
+        subject_info.append(f"Target Parcel ID: {folder_name}")
+
+    return "\n".join(subject_info)
+
+def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, parcel_dir=None, model="gemini-3.6-flash"):
     """
     Analyzes a single document PDF with Gemini vision.
     Generates an ultra-succinct, pared-down, client-ready Runsheet Comment (2-4 lines max)
-    with mandatory Dower status on BOTH Deeds and Mortgages, storing rich quotes in source_provenance.
+    focused strictly on the target subject land, with mandatory Dower on Deeds and Mortgages.
     """
     if not api_key:
         return None, "No Gemini API key provided."
@@ -48,9 +99,17 @@ Draft Runsheet Metadata:
 - Preliminary Raw Notes: {row_meta.get('notes', '')}
 """
 
+    subject_land = ""
+    if parcel_dir:
+        subject_land = get_subject_land_context(parcel_dir)
+
     system_prompt = f"""
 You are an expert Ohio Title Examiner following strict Gulfport Energy & Belmont County Runsheet standards.
 Your output comment MUST BE EXTREMELY SUCCINCT, PARED-DOWN, AND BRIEF (2 to 4 lines maximum).
+
+TARGET SUBJECT LAND (TARGET PARCEL):
+{subject_land}
+(CRITICAL INSTRUCTION: Always focus specifically on the tract/lot matching the target subject property above. If a deed conveys multiple lots or tracts, state the conveyed interest for the target subject property, or note "Undivided X interest" or "ARTI").
 
 REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
 - Standard Warranty Deed:
@@ -103,34 +162,35 @@ REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
 
 STRICT RULES FOR THE "comments" FIELD:
 1. EXTREME BREVITY: Do NOT dump legal descriptions, lot numbers lists, or narrative paragraphs. Keep the "comments" field strictly to 2-4 lines using the exact keywords above.
-2. DOWER IS MANDATORY FOR BOTH DEEDS AND MORTGAGES:
+2. SUBJECT LAND FOCUS: Focus exclusively on the target subject land provided above.
+3. DOWER IS MANDATORY FOR BOTH DEEDS AND MORTGAGES:
    - State "Dower released" if spouse joins/releases dower/homestead.
    - State "No dower mentioned" if mortgagor/grantor is single, unmarried, or no dower clause is present.
    - State "Dower not stated" if unspecified.
-3. MORTGAGES: Always include the 4 standard components:
+4. MORTGAGES: Always include the 4 standard components:
    Amount: $X
    Maturity Date: MM/DD/YYYY (or "Not stated")
    Dower released (or "No dower mentioned")
    Release: [Book] [Vol]/[Pg] (if released, or omit if unreleased)
-4. CONVEYANCE: Use "ARTI" for fee simple conveyance, or state fractional interest (e.g. "Undivided 1/2 interest").
-5. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
-6. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
-7. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
+5. CONVEYANCE: Use "ARTI" for fee simple conveyance, or state fractional interest (e.g. "Undivided 1/2 interest").
+6. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
+7. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
+8. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
 
 {meta_info}
 
 Return a STRICT JSON object with this exact structure:
 {{
-  "instrument_type": "Mortgage",
-  "book_type": "MR",
-  "volume": "734",
-  "page": "604",
+  "instrument_type": "Warranty Deed",
+  "book_type": "DR",
+  "volume": "391",
+  "page": "183",
   "effective_date": "MM/DD/YYYY",
   "filing_date": "MM/DD/YYYY",
   "grantor": "...",
   "grantee": "...",
-  "conveyance": "Mortgage",
-  "comments": "Amount: $30,000.00\\nMaturity Date: 03/12/2005\\nDower released\\nPrior Ref: DR 531/153",
+  "conveyance": "Fee Simple",
+  "comments": "ARTI\\nDower released\\nPrior Ref: DR 362/222",
   "source_provenance": {{
     "subject_tract_quote": "Verbatim quote of tract from PDF",
     "subject_tract_page": 1,
@@ -244,7 +304,7 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
             "notes": str(ws.cell(row=r_idx, column=col_map.get("comments", 12)).value or "")
         }
 
-        res_data, err = analyze_document_with_gemini(api_key, target_pdf, row_meta, model=model)
+        res_data, err = analyze_document_with_gemini(api_key, target_pdf, row_meta, parcel_dir=parcel_dir, model=model)
         if res_data and isinstance(res_data, dict):
             if "comments" in col_map and res_data.get("comments"):
                 ws.cell(row=r_idx, column=col_map["comments"]).value = res_data["comments"]
