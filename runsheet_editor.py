@@ -2577,11 +2577,29 @@ class RunsheetEditorWindow(tk.Toplevel):
                 book = book.strip().upper()
                 if not book:
                     book = 'OR' # Default to OR if no prefix is provided
-                return f'Releases mortgage recorded in {book} {vol}/{pg}'
+                
+                # Check instrument type from the UI
+                inst_type = ""
+                try:
+                    for i, h in enumerate(self.headers):
+                        if h.lower() == 'instrument':
+                            widget = self.widgets_by_col.get(i)
+                            if widget and hasattr(widget, 'get'):
+                                inst_type = widget.get().lower()
+                            break
+                except: pass
+                
+                if "release" in inst_type or "satisfaction" in inst_type:
+                    return f'Releases mortgage recorded in {book} {vol}/{pg}'
+                else:
+                    return f'Release: {book} {vol}/{pg}'
             txt = re.sub(r'Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?(?:VOL(?:UME)?\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s]*(?:PAGE\s*|PG\s*)?(\d+)', format_released, txt, flags=re.IGNORECASE)
             txt = re.sub(r'([^\n\u200B])\s*(Releases mortgage recorded in)', r'\1\n\2', txt)
             txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
             txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
+            txt = re.sub(r'([^\n\u200B])\s*(Release:)', r'\1\n\2', txt)
+            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
+            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
             # Append Original Notes block if new
             if not is_already_formatted and txt != raw_original:
