@@ -2010,6 +2010,12 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.row_statuses[str(self.current_row_idx)] = new_status
         self.save_statuses()
         
+        # Auto-save current row edits and excel workbook silently
+        try:
+            self.save_row(show_msg=False)
+        except Exception as e:
+            print(f"Auto-save on status change error: {e}")
+        
         # update listbox color without full reload
         sel = self.listbox.curselection()
         if sel:
