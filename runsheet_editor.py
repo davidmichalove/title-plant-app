@@ -1166,43 +1166,6 @@ class RunsheetEditorWindow(tk.Toplevel):
         
     def save_row(self, show_msg=True):
         if not self.current_row_idx: return
-        
-        # Validation Check
-        empty_fields = []
-        is_acreage_zero = False
-        
-        for i, widget in self.widgets_by_col.items():
-            header = self.headers[i].lower()
-            if "deed plot" in header:
-                continue
-                
-            val = ""
-            if isinstance(widget, ttk.Entry) or isinstance(widget, tk.Text):
-                if isinstance(widget, tk.Text):
-                    val = widget.get("1.0", tk.END).strip()
-                else:
-                    val = widget.get().strip()
-                    
-            if not val:
-                # Some fields might legitimately be blank if they are not needed, 
-                # but user requested an error for ANY blank text box.
-                # However, Notes is hidden. Let's exclude Notes.
-                if "notes" not in header and "comment" not in header:
-                    empty_fields.append(self.headers[i])
-                    
-            if "acreage" in header and val == "0":
-                is_acreage_zero = True
-                
-        if empty_fields or is_acreage_zero:
-            import tkinter.messagebox as messagebox_local
-            err_msg = ""
-            if empty_fields:
-                err_msg += "The following fields cannot be blank:\n- " + "\n- ".join(empty_fields) + "\n\n"
-            if is_acreage_zero:
-                err_msg += "Acreage cannot be 0.\n"
-            
-            messagebox.showerror("Validation Error", err_msg.strip(), parent=self)
-            return
 
         row_cells = self.ws[self.current_row_idx]
         for i, widget in self.widgets_by_col.items():
