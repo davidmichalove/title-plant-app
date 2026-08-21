@@ -2598,8 +2598,8 @@ class RunsheetEditorWindow(tk.Toplevel):
             match = arti_pattern.search(txt)
             if match:
                 extracted = match.group(0).strip()
-                extracted = re.sub(r'(?i)\bconvey(?:s|ed)?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?all,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?rights?,?\s*title,?\s*(?:and|&)\s*interest\b', 'Conveys all rights, title, and interest', extracted)
-                extracted = re.sub(r'(?i)\ball,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?rights?,?\s*title,?\s*(?:and|&)\s*interest\b', 'all rights, title, and interest', extracted)
+                extracted = re.sub(r'(?i)\bconvey(?:s|ed)?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?all,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?rights?,?\s*title,?\s*(?:and|&)\s*interest\b', 'Conveys all right, title, and interest', extracted)
+                extracted = re.sub(r'(?i)\ball,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?rights?,?\s*title,?\s*(?:and|&)\s*interest\b', 'all right, title, and interest', extracted)
                 txt = txt.replace(match.group(0).strip(), "").strip()
                 txt = re.sub(r'^[,\.]\s*', '', txt)
                 txt = re.sub(r'\s+([,\.])', r'\1', txt)
