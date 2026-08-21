@@ -1,0 +1,17 @@
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.pdf
+*.xlsx
+*.xls
+*.csv
+*.html
+*.json
+__pycache__/
+*.pyc
+.DS_Store
+*.db
+*.sqlite3
+shape_files/
