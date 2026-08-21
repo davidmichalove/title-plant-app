@@ -2900,9 +2900,14 @@ class RunsheetEditorWindow(tk.Toplevel):
         default_phrases = [
             "Dower released.",
             "No dower mentioned.",
+            "Expired by term.",
+            "Releases mortgage recorded in",
+            "for their joint lives, remainder to the survivor of them",
             "Maturity Date: Not stated.",
             "No release found of record.",
-            "Prior Ref:"
+            "Prior Ref:",
+            "Additional lands included, not part of subject.",
+            "ARTI"
         ]
         phrases = default_phrases[:]
         if os.path.exists(phrases_file):
@@ -2981,9 +2986,14 @@ class RunsheetEditorWindow(tk.Toplevel):
         default_phrases = [
             "Dower released.",
             "No dower mentioned.",
+            "Expired by term.",
+            "Releases mortgage recorded in",
+            "for their joint lives, remainder to the survivor of them",
             "Maturity Date: Not stated.",
             "No release found of record.",
-            "Prior Ref:"
+            "Prior Ref:",
+            "Additional lands included, not part of subject.",
+            "ARTI"
         ]
         
         if not os.path.exists(phrases_file):
@@ -3021,7 +3031,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                 elif idx == 9:
                     num_prefix = "[0] "
                 else:
-                    num_prefix = "     "
+                    num_prefix = f"[{idx + 1}] "
                 listbox.insert(tk.END, f"{num_prefix}{display_p}")
                 
         refresh_list()
