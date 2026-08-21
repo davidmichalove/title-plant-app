@@ -234,6 +234,18 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.bind("<Control-f>", self.set_status_completed)
         self.bind("<Command-d>", self.toggle_dower_reviewed)
         self.bind("<Control-d>", self.toggle_dower_reviewed)
+        
+        # Delete Original Block shortcuts
+        self.bind("<Command-Shift-D>", self.delete_original_block)
+        self.bind("<Command-Shift-d>", self.delete_original_block)
+        self.bind("<Control-Shift-D>", self.delete_original_block)
+        self.bind("<Control-Shift-d>", self.delete_original_block)
+        self.bind("<Command-Shift-O>", self.delete_original_block)
+        self.bind("<Command-Shift-o>", self.delete_original_block)
+        self.bind("<Control-Shift-O>", self.delete_original_block)
+        self.bind("<Control-Shift-o>", self.delete_original_block)
+        self.bind("<Alt-d>", self.delete_original_block)
+        self.bind("<Alt-D>", self.delete_original_block)
         self.bind("<Command-o>", lambda e: self.open_pdf_for_row())
         self.bind("<Control-o>", lambda e: self.open_pdf_for_row())
         self.bind("<Command-n>", self.convert_to_normal_case)
@@ -2787,6 +2799,58 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.on_status_change(None)
         return "break"
 
+    def delete_original_block(self, event=None):
+        comments_widget = None
+        for i, h in enumerate(self.headers):
+            if "comment" in h.lower() or "note" in h.lower():
+                w = self.widgets_by_col.get(i)
+                if isinstance(w, tk.Text):
+                    comments_widget = w
+                break
+        
+        focus_w = self.focus_get()
+        target_w = focus_w if isinstance(focus_w, tk.Text) else comments_widget
+        
+        if target_w and isinstance(target_w, tk.Text):
+            txt = target_w.get("1.0", "end-1c")
+            if "--- Original ---" in txt:
+                new_txt = txt.split("--- Original ---")[0].rstrip()
+                target_w.delete("1.0", tk.END)
+                target_w.insert("1.0", new_txt)
+                
+                self.perform_spellcheck(target_w)
+                self.highlight_links(target_w)
+                
+                # Re-evaluate warnings immediately
+                if getattr(self, 'current_row_idx', None):
+                    warnings = getattr(self, 'row_warnings', {}).get(str(self.current_row_idx), [])
+                    if "Original text block not deleted." in warnings:
+                        warnings.remove("Original text block not deleted.")
+                        if warnings:
+                            self.row_warnings[str(self.current_row_idx)] = warnings
+                        else:
+                            if str(self.current_row_idx) in self.row_warnings:
+                                del self.row_warnings[str(self.current_row_idx)]
+                        
+                        try:
+                            idx = self.row_indices.index(self.current_row_idx)
+                            self._apply_row_color(idx)
+                        except: pass
+                        
+                        warn_text = ""
+                        if warnings: warn_text += "⚠️ " + " | ".join(warnings)
+                        if getattr(self, 'current_ai_full_text', ""):
+                            vol = str(self.ws.cell(row=self.current_row_idx, column=3).value or "").strip()
+                            pg = str(self.ws.cell(row=self.current_row_idx, column=4).value or "").strip()
+                            cache_key = f"{vol}_{pg}"
+                            if hasattr(self, 'ai_qc_cache') and cache_key in self.ai_qc_cache:
+                                raw_text = self.ai_qc_cache[cache_key]
+                                if "SUMMARY:" in raw_text and "FULL TEXT:" in raw_text:
+                                    parts = raw_text.split("FULL TEXT:")
+                                    warn_text += "\n🤖 AI Check " + parts[0].replace("SUMMARY:", "").strip()
+                        self.warning_label.config(text=warn_text.strip())
+        return "break"
+
     def toggle_dower_reviewed(self, event=None):
         if getattr(self, 'qc_vars', None) and len(self.qc_vars) > 0:
             current_val = self.qc_vars[0].get()
@@ -2879,6 +2943,7 @@ class RunsheetEditorWindow(tk.Toplevel):
             ("Ctrl + P / Cmd + P", "Set status to 'In Progress'"),
             ("Ctrl + F / Cmd + F", "Set status to 'Completed'"),
             ("Ctrl + D / Cmd + D", "Toggle 'Dower Reviewed' checkbox"),
+            ("Cmd+Shift+D / Cmd+Shift+O", "Delete '--- Original ---' notes block"),
             ("Ctrl + O / Cmd + O", "Open Document (PDF for current row)"),
             ("Ctrl + N / Cmd + N", "Convert selection or field to Title Case"),
             ("Ctrl + L / Cmd + L", "Open Phrase Library window"),
