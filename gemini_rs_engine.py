@@ -29,7 +29,7 @@ def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, model="gemini
     """
     Analyzes a single document PDF with Gemini vision.
     Generates an ultra-succinct, pared-down, client-ready Runsheet Comment (2-4 lines max)
-    and stores rich quotes, page numbers, and reasoning in source_provenance.
+    with mandatory Dower status on BOTH Deeds and Mortgages, storing rich quotes in source_provenance.
     """
     if not api_key:
         return None, "No Gemini API key provided."
@@ -68,15 +68,22 @@ REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
   Dower released
   Prior Ref: DR 362/222
 
-- Deed with Mineral / Oil & Gas Exception or Life Estate:
+- Deed with Mineral / Oil & Gas Exception:
   ARTI
   [[BOLD_START]]EXCEPTING all oil and gas rights.[[BOLD_END]]
   No dower mentioned
   Prior Ref: DR 500/100
 
-- Mortgage:
+- Mortgage (with Dower):
+  Amount: $50,000.00
+  Maturity Date: 05/01/2015
+  Dower released
+  Release: OR 234/567
+
+- Mortgage (without Dower / Single):
   Amount: $12,946.66
   Maturity Date: Not stated
+  No dower mentioned
   Release: MR 107/710
 
 - Release of Mortgage:
@@ -96,26 +103,34 @@ REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
 
 STRICT RULES FOR THE "comments" FIELD:
 1. EXTREME BREVITY: Do NOT dump legal descriptions, lot numbers lists, or narrative paragraphs. Keep the "comments" field strictly to 2-4 lines using the exact keywords above.
-2. CONVEYANCE: Use "ARTI" for fee simple conveyance, or state fractional interest (e.g. "Undivided 1/2 interest").
-3. DOWER: Strictly "Dower released" or "No dower mentioned" or "Dower not stated".
-4. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
-5. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
-6. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
+2. DOWER IS MANDATORY FOR BOTH DEEDS AND MORTGAGES:
+   - State "Dower released" if spouse joins/releases dower/homestead.
+   - State "No dower mentioned" if mortgagor/grantor is single, unmarried, or no dower clause is present.
+   - State "Dower not stated" if unspecified.
+3. MORTGAGES: Always include the 4 standard components:
+   Amount: $X
+   Maturity Date: MM/DD/YYYY (or "Not stated")
+   Dower released (or "No dower mentioned")
+   Release: [Book] [Vol]/[Pg] (if released, or omit if unreleased)
+4. CONVEYANCE: Use "ARTI" for fee simple conveyance, or state fractional interest (e.g. "Undivided 1/2 interest").
+5. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
+6. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
+7. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
 
 {meta_info}
 
 Return a STRICT JSON object with this exact structure:
 {{
-  "instrument_type": "Warranty Deed",
-  "book_type": "DR",
-  "volume": "391",
-  "page": "183",
+  "instrument_type": "Mortgage",
+  "book_type": "MR",
+  "volume": "734",
+  "page": "604",
   "effective_date": "MM/DD/YYYY",
   "filing_date": "MM/DD/YYYY",
   "grantor": "...",
   "grantee": "...",
-  "conveyance": "Fee Simple",
-  "comments": "ARTI\\nDower released\\nPrior Ref: DR 362/222",
+  "conveyance": "Mortgage",
+  "comments": "Amount: $30,000.00\\nMaturity Date: 03/12/2005\\nDower released\\nPrior Ref: DR 531/153",
   "source_provenance": {{
     "subject_tract_quote": "Verbatim quote of tract from PDF",
     "subject_tract_page": 1,
