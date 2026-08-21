@@ -2570,6 +2570,11 @@ class RunsheetEditorWindow(tk.Toplevel):
         prior_ref_str = ""
         txt = re.sub(r'Prior\s*deed\s*references?:?', 'Prior Ref:', txt, flags=re.IGNORECASE)
         txt = re.sub(r'Prior\s*references?:?', 'Prior Ref:', txt, flags=re.IGNORECASE)
+        
+        # Remove duplicate adjacent book identifiers (e.g. 'DR DR' -> 'DR')
+        dup_book_pattern = r'\b(DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|PB)\s+(?=(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|PB)\b)'
+        while re.search(dup_book_pattern, txt, flags=re.IGNORECASE):
+            txt = re.sub(dup_book_pattern, '', txt, flags=re.IGNORECASE)
 
         # Extract Prior Ref
         prior_ref_match = re.search(r'(Prior Ref:[^\n\.]*(?:\.|$))', txt, re.IGNORECASE)
@@ -2696,6 +2701,11 @@ class RunsheetEditorWindow(tk.Toplevel):
         import re
         # Collapse multiple spaces and tabs into a single space
         txt = re.sub(r'[ \t]{2,}', ' ', txt)
+        
+        # Remove duplicate adjacent book identifiers (e.g. 'DR DR' -> 'DR', always deleting the front duplicate)
+        dup_book_pattern = r'\b(DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|PB)\s+(?=(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|PB)\b)'
+        while re.search(dup_book_pattern, txt, flags=re.IGNORECASE):
+            txt = re.sub(dup_book_pattern, '', txt, flags=re.IGNORECASE)
         
         if "grantor" in header_name or "grantee" in header_name:
             txt = re.sub(r'(?i)\bhusband\s+and\s+wife\b', 'husband and wife', txt)
