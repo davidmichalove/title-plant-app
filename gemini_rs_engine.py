@@ -44,22 +44,18 @@ def get_subject_land_context(parcel_dir):
                     for page in doc:
                         txt += page.get_text() + "\n"
                     
-                    # Extract Legal Description
                     legal_m = re.search(r'Legal\s+Description\s*\n+([^\n]+)', txt, re.IGNORECASE)
                     if legal_m:
                         subject_info.append(f"Legal Description: {legal_m.group(1).strip()}")
                     
-                    # Extract Parcel Number
                     p_num_m = re.search(r'Parcel\s+Number\s*\n+([^\n]+)', txt, re.IGNORECASE)
                     if p_num_m:
                         subject_info.append(f"Parcel Number: {p_num_m.group(1).strip()}")
                         
-                    # Extract Owner / Deeded Name
                     owner_m = re.search(r'Deeded\s+Name\s*\n+([^\n]+)', txt, re.IGNORECASE)
                     if owner_m:
                         subject_info.append(f"Current Record Owner: {owner_m.group(1).strip()}")
                         
-                    # Extract Tax District
                     dist_m = re.search(r'Tax\s+District\s*\n+([^\n]+)', txt, re.IGNORECASE)
                     if dist_m:
                         subject_info.append(f"Tax District: {dist_m.group(1).strip()}")
@@ -70,7 +66,6 @@ def get_subject_land_context(parcel_dir):
                     pass
 
     if not subject_info:
-        # Fallback to folder name
         folder_name = os.path.basename(parcel_dir).replace("PID ", "").strip()
         subject_info.append(f"Target Parcel ID: {folder_name}")
 
@@ -284,7 +279,7 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
     total = len(rows_to_process)
     for i, (r_idx, vol, pg) in enumerate(rows_to_process, 1):
         if progress_callback:
-            progress_callback(i, total, f"Processing Row {r_idx} (Vol {vol} Pg {pg})...")
+            progress_callback(i, total, f"Row {r_idx} (Vol {vol} Pg {pg})")
 
         target_pdf = None
         for fn in os.listdir(docs_dir):
@@ -306,8 +301,24 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
 
         res_data, err = analyze_document_with_gemini(api_key, target_pdf, row_meta, parcel_dir=parcel_dir, model=model)
         if res_data and isinstance(res_data, dict):
-            if "comments" in col_map and res_data.get("comments"):
-                ws.cell(row=r_idx, column=col_map["comments"]).value = res_data["comments"]
+            gemini_comm = res_data.get("comments", "").strip()
+            if "comments" in col_map and gemini_comm:
+                raw_existing = str(ws.cell(row=r_idx, column=col_map["comments"]).value or "").strip()
+                
+                original_note = ""
+                if "--- Original ---" in raw_existing:
+                    original_note = raw_existing.split("--- Original ---")[1].strip()
+                elif "--- Gemini Draft ---" in raw_existing:
+                    original_note = raw_existing.split("--- Gemini Draft ---")[0].strip()
+                else:
+                    original_note = raw_existing
+
+                formatted_output = f"{gemini_comm}\n\n--- Gemini Draft ---\n{gemini_comm}"
+                if original_note and original_note != gemini_comm:
+                    formatted_output += f"\n\n--- Original ---\n{original_note}"
+
+                ws.cell(row=r_idx, column=col_map["comments"]).value = formatted_output
+
             if "conveyance" in col_map and res_data.get("conveyance"):
                 ws.cell(row=r_idx, column=col_map["conveyance"]).value = res_data["conveyance"]
             if "grantor" in col_map and res_data.get("grantor") and not ws.cell(row=r_idx, column=col_map["grantor"]).value:

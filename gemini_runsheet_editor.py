@@ -3,6 +3,7 @@ import json
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
+import openpyxl
 
 import runsheet_editor
 import gemini_rs_engine
@@ -32,6 +33,61 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
         # Bind Cmd+G and Ctrl+G
         self.bind("<Command-g>", lambda e: self.draft_current_row_with_gemini())
         self.bind("<Control-g>", lambda e: self.draft_current_row_with_gemini())
+
+        # Update initial field labels on startup
+        if self.current_row_idx:
+            self._update_field_labels(self.current_row_idx)
+
+        # Trigger automatic initial Gemini audit in background if first time
+        self.check_and_run_initial_gemini_drafts()
+
+    def check_and_run_initial_gemini_drafts(self):
+        """Automatically runs Gemini on all documents upon first opening the parcel."""
+        gemini_marker = os.path.join(self.pid_dir, "initial_gemini_batch_done.json")
+        if os.path.exists(gemini_marker):
+            return
+
+        api_key = gemini_rs_engine.get_api_key()
+        if not api_key:
+            return
+
+        self.warning_label.config(text="🤖 Initial Audit: Gemini is drafting AI comments and analyzing all PDF scans in background...")
+
+        def worker():
+            def cb(cur, total, msg):
+                def update_status():
+                    if hasattr(self, 'warning_label'):
+                        self.warning_label.config(text=f"🤖 Initial Audit ({cur}/{total}): Processing {msg}...")
+                self.after(0, update_status)
+
+            ok, res_msg = gemini_rs_engine.batch_generate_runsheet(api_key, self.pid_dir, progress_callback=cb)
+            
+            if ok:
+                try:
+                    with open(gemini_marker, "w") as f:
+                        json.dump({"initial_gemini_batch_completed": True}, f)
+                except Exception: pass
+
+            def on_done():
+                if os.path.exists(self.provenance_file):
+                    try:
+                        with open(self.provenance_file, "r") as f:
+                            self.provenance_data = json.load(f)
+                    except Exception: pass
+
+                try:
+                    self.wb = openpyxl.load_workbook(self.excel_path, rich_text=True)
+                    self.ws = self.wb.active
+                    self.load_rows()
+                    if self.current_row_idx:
+                        self.on_select(None)
+                except Exception: pass
+
+                self.warning_label.config(text="✨ Initial AI Audit & Gemini Drafts complete! All rows loaded with provenance.")
+
+            self.after(0, on_done)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def delete_original_block(self, event=None):
         """Removes both --- Gemini Draft --- and --- Original --- blocks."""
