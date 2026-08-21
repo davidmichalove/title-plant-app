@@ -260,16 +260,10 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.bind("<Control-l>", lambda e: self.open_phrase_library())
         
         # Row Arrow Navigation (Ctrl/Cmd/Alt + Up/Down)
-        self.bind("<Control-Up>", self.nav_prev_row)
-        self.bind("<Control-Down>", self.nav_next_row)
-        self.bind("<Command-Up>", self.nav_prev_row)
-        self.bind("<Command-Down>", self.nav_next_row)
-        self.bind("<Alt-Up>", self.nav_prev_row)
-        self.bind("<Alt-Down>", self.nav_next_row)
-        
-        # Up / Down on Listbox auto-loads row
-        self.listbox.bind("<KeyRelease-Up>", lambda e: self.on_select(None))
-        self.listbox.bind("<KeyRelease-Down>", lambda e: self.on_select(None))
+        for seq in ("<Control-Up>", "<Control-Down>", "<Command-Up>", "<Command-Down>", "<Alt-Up>", "<Alt-Down>"):
+            handler = self.nav_prev_row if "Up" in seq else self.nav_next_row
+            self.bind_all(seq, handler)
+            self.listbox.bind(seq, handler)
         
         # Number shortcuts for inserting phrases (Ctrl+1 .. Ctrl+9, Ctrl+0)
         for num in range(10):
@@ -2757,42 +2751,42 @@ class RunsheetEditorWindow(tk.Toplevel):
         return txt
 
     def nav_prev_row(self, event=None):
-        sel = self.listbox.curselection()
-        if not sel:
-            if self.row_indices:
-                self.listbox.selection_set(0)
-                self.listbox.see(0)
-                self.on_select(None)
+        if not self.row_indices:
             return "break"
-        curr_idx = sel[0]
-        if curr_idx > 0:
+        if self.current_row_idx and self.current_row_idx in self.row_indices:
+            curr_pos = self.row_indices.index(self.current_row_idx)
+        else:
+            sel = self.listbox.curselection()
+            curr_pos = sel[0] if sel else 0
+            
+        if curr_pos > 0:
             if self.current_row_idx:
                 try: self.save_row(show_msg=False)
                 except Exception: pass
-            new_idx = curr_idx - 1
+            new_pos = curr_pos - 1
             self.listbox.selection_clear(0, tk.END)
-            self.listbox.selection_set(new_idx)
-            self.listbox.see(new_idx)
+            self.listbox.selection_set(new_pos)
+            self.listbox.see(new_pos)
             self.on_select(None)
         return "break"
 
     def nav_next_row(self, event=None):
-        sel = self.listbox.curselection()
-        if not sel:
-            if self.row_indices:
-                self.listbox.selection_set(0)
-                self.listbox.see(0)
-                self.on_select(None)
+        if not self.row_indices:
             return "break"
-        curr_idx = sel[0]
-        if curr_idx < len(self.row_indices) - 1:
+        if self.current_row_idx and self.current_row_idx in self.row_indices:
+            curr_pos = self.row_indices.index(self.current_row_idx)
+        else:
+            sel = self.listbox.curselection()
+            curr_pos = sel[0] if sel else 0
+            
+        if curr_pos < len(self.row_indices) - 1:
             if self.current_row_idx:
                 try: self.save_row(show_msg=False)
                 except Exception: pass
-            new_idx = curr_idx + 1
+            new_pos = curr_pos + 1
             self.listbox.selection_clear(0, tk.END)
-            self.listbox.selection_set(new_idx)
-            self.listbox.see(new_idx)
+            self.listbox.selection_set(new_pos)
+            self.listbox.see(new_pos)
             self.on_select(None)
         return "break"
 
