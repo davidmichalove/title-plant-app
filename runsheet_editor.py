@@ -230,6 +230,8 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.bind("<Control-s>", lambda e: self.save_row())
         self.bind("<Command-p>", self.set_status_in_progress)
         self.bind("<Control-p>", self.set_status_in_progress)
+        self.bind("<Command-f>", self.set_status_completed)
+        self.bind("<Control-f>", self.set_status_completed)
         self.bind("<Command-n>", self.convert_to_normal_case)
         self.bind("<Control-n>", self.convert_to_normal_case)
         self.bind("<Command-l>", lambda e: self.open_phrase_library())
@@ -2775,6 +2777,11 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.on_status_change(None)
         return "break"
 
+    def set_status_completed(self, event=None):
+        self.status_var.set("Completed")
+        self.on_status_change(None)
+        return "break"
+
     def convert_to_normal_case(self, event=None):
         widget = self.focus_get()
         if isinstance(widget, tk.Text):
@@ -2857,6 +2864,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         shortcuts = [
             ("Ctrl + S / Cmd + S", "Save current row"),
             ("Ctrl + P / Cmd + P", "Set status to 'In Progress'"),
+            ("Ctrl + F / Cmd + F", "Set status to 'Completed'"),
             ("Ctrl + N / Cmd + N", "Convert selection or field to Title Case"),
             ("Ctrl + L / Cmd + L", "Open Phrase Library window"),
             ("Ctrl + 1 .. 9, 0", "Insert Phrase #1 through #10 at cursor"),
