@@ -799,36 +799,89 @@ class RunsheetEditorWindow(tk.Toplevel):
             pass # No selection
         return "break"
         
-    def _update_instrument_label(self, row_idx):
+    def _update_field_labels(self, row_idx):
         if not getattr(self, 'label_widgets_by_col', None): return
-        if 0 not in self.label_widgets_by_col: return
-        
-        lbl = self.label_widgets_by_col[0]
-        base_text = self.headers[0] if self.headers else "Instrument Type"
-        
-        # Reset bindings
-        lbl.config(text=base_text, fg="systemTextColor", cursor="arrow")
-        lbl.unbind("<Button-1>")
-        
-        if not hasattr(self, 'ai_title_cache'): return
         
         v = str(self.ws.cell(row=row_idx, column=3).value or "").strip()
         p = str(self.ws.cell(row=row_idx, column=4).value or "").strip()
-        i_val = str(self.ws.cell(row=row_idx, column=1).value or "").strip().lower()
+        ck = f"{v}_{p}"
         
-        if v and p:
-            ck = f"{v}_{p}"
-            if ck in self.ai_title_cache:
-                c_title = self.ai_title_cache[ck].lower()
-                actual_title = self.ai_title_cache[ck]
-                if c_title and i_val != c_title:
+        ai_data = {}
+        # 1. Load from provenance data if present
+        if hasattr(self, 'provenance_data') and self.provenance_data:
+            prov = self.provenance_data.get(ck) or self.provenance_data.get(str(row_idx), {})
+            if isinstance(prov, dict):
+                ai_data.update(prov)
+                
+        # 2. Check ai_title_cache
+        if hasattr(self, 'ai_title_cache') and ck in self.ai_title_cache:
+            ai_data['instrument_type'] = self.ai_title_cache[ck]
+
+        for col_idx, lbl in self.label_widgets_by_col.items():
+            if col_idx >= len(self.headers): continue
+            header = self.headers[col_idx]
+            hl = header.lower()
+            
+            # Exclude conveyance, deed plot, comments, notes
+            if "conveyance" in hl or "deed plot" in hl or "comment" in hl or "note" in hl:
+                lbl.config(text=header, fg="systemTextColor", cursor="arrow")
+                lbl.unbind("<Button-1>")
+                continue
+                
+            base_text = header
+            lbl.config(text=base_text, fg="systemTextColor", cursor="arrow")
+            lbl.unbind("<Button-1>")
+            
+            ai_val = None
+            if ("instrument" in hl and "type" in hl) or hl == "instrument":
+                ai_val = ai_data.get("instrument_type") or ai_data.get("instrument")
+            elif "grantor" in hl or "lessor" in hl:
+                ai_val = ai_data.get("grantor") or ai_data.get("grantor_lessor")
+            elif "grantee" in hl or "lessee" in hl:
+                ai_val = ai_data.get("grantee") or ai_data.get("grantee_lessee")
+            elif "effective" in hl and "date" in hl:
+                ai_val = ai_data.get("effective_date")
+            elif "filing" in hl and "date" in hl:
+                ai_val = ai_data.get("filing_date")
+            elif "acreage" in hl:
+                ai_val = ai_data.get("acreage")
+            elif "book" in hl and "type" in hl:
+                ai_val = ai_data.get("book_type")
+            elif "instrument number" in hl:
+                ai_val = ai_data.get("instrument_number")
+                
+            if ai_val:
+                ai_val_str = str(ai_val).strip()
+                w = self.widgets_by_col.get(col_idx)
+                curr_val = ""
+                if w:
+                    if hasattr(w, 'get') and callable(w.get):
+                        curr_val = w.get().strip()
+                    elif isinstance(w, tk.Text):
+                        curr_val = w.get("1.0", "end-1c").strip()
+                        
+                def norm(s):
+                    import re
+                    return re.sub(r'[\s,._/-]+', '', str(s).lower())
+                    
+                if ai_val_str and norm(curr_val) != norm(ai_val_str):
                     lbl.config(text=f"🔍 {base_text}", fg="systemLinkColor", cursor="hand2")
-                    def apply_title(e):
-                        w = self.widgets_by_col.get(0)
-                        if w:
-                            w.delete(0, 'end')
-                            w.insert(0, actual_title)
-                    lbl.bind("<Button-1>", apply_title)
+                    def make_apply(widget=w, target_val=ai_val_str, label=lbl, orig_text=base_text):
+                        def apply_val(e):
+                            if widget:
+                                if hasattr(widget, 'delete') and hasattr(widget, 'insert'):
+                                    if isinstance(widget, tk.Text):
+                                        widget.delete("1.0", tk.END)
+                                        widget.insert("1.0", target_val)
+                                    else:
+                                        widget.delete(0, tk.END)
+                                        widget.insert(0, target_val)
+                                    label.config(text=orig_text, fg="systemTextColor", cursor="arrow")
+                                    label.unbind("<Button-1>")
+                        return apply_val
+                    lbl.bind("<Button-1>", make_apply())
+
+    _update_instrument_label = _update_field_labels
 
     def on_select(self, event):
         selection = self.listbox.curselection()

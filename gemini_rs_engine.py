@@ -316,8 +316,18 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
                 ws.cell(row=r_idx, column=col_map["grantee"]).value = res_data["grantee"]
 
             cache_key = f"{vol}_{pg}"
-            provenance_data[cache_key] = res_data.get("source_provenance", {})
-            provenance_data[str(r_idx)] = res_data.get("source_provenance", {})
+            prov_payload = dict(res_data.get("source_provenance", {}))
+            prov_payload.update({
+                "instrument_type": res_data.get("instrument_type"),
+                "book_type": res_data.get("book_type"),
+                "grantor": res_data.get("grantor"),
+                "grantee": res_data.get("grantee"),
+                "effective_date": res_data.get("effective_date"),
+                "filing_date": res_data.get("filing_date"),
+                "acreage": res_data.get("acreage")
+            })
+            provenance_data[cache_key] = prov_payload
+            provenance_data[str(r_idx)] = prov_payload
 
     wb.save(rs_path)
     with open(provenance_file, "w") as f:

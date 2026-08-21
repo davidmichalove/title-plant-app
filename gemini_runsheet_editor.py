@@ -241,14 +241,27 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
                             w.delete(0, tk.END)
                             w.insert(0, res_data["conveyance"])
 
-                # Save Provenance
+                # Save Provenance and Extracted Fields for Blue Label Verification
                 cache_key = f"{vol}_{pg}"
-                self.provenance_data[cache_key] = res_data.get("source_provenance", {})
-                self.provenance_data[str(self.current_row_idx)] = res_data.get("source_provenance", {})
+                prov_payload = dict(res_data.get("source_provenance", {}))
+                prov_payload.update({
+                    "instrument_type": res_data.get("instrument_type"),
+                    "book_type": res_data.get("book_type"),
+                    "grantor": res_data.get("grantor"),
+                    "grantee": res_data.get("grantee"),
+                    "effective_date": res_data.get("effective_date"),
+                    "filing_date": res_data.get("filing_date"),
+                    "acreage": res_data.get("acreage")
+                })
+                self.provenance_data[cache_key] = prov_payload
+                self.provenance_data[str(self.current_row_idx)] = prov_payload
                 with open(self.provenance_file, "w") as f:
                     json.dump(self.provenance_data, f, indent=4)
 
-                self.warning_label.config(text=f"✨ Gemini draft loaded! Press Cmd+A to view source quotes and reasoning.")
+                # Update Blue Label Indicators across all fields
+                self._update_field_labels(self.current_row_idx)
+
+                self.warning_label.config(text=f"✨ Gemini draft loaded! Click any 🔍 Blue Label to auto-apply suggested values, or press Cmd+A.")
 
             self.after(0, apply_res)
 
