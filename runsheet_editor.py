@@ -75,6 +75,8 @@ class RunsheetEditorWindow(tk.Toplevel):
         if os.path.exists(self.warnings_ignored_file):
             with open(self.warnings_ignored_file, "r") as f:
                 self.warnings_ignored = json.load(f)
+                
+        self.formatted_state_file = os.path.join(self.pid_dir, "initial_formatting_done.json")
         self.trash_file = os.path.join(self.pid_dir, "trash_rows.json")
         self.trash_rows = self.load_trash()
         
@@ -1498,6 +1500,13 @@ class RunsheetEditorWindow(tk.Toplevel):
             print(f"Failed to update mortgage note: {e}")
 
         try:
+            if hasattr(self, 'formatted_state_file') and not os.path.exists(self.formatted_state_file):
+                import json
+                with open(self.formatted_state_file, "w") as f:
+                    json.dump({"initial_formatting_completed": True}, f)
+        except Exception: pass
+
+        try:
             self.wb.save(self.excel_path)
             if show_msg:
                 messagebox.showinfo("Success", f"Row {self.current_row_idx} saved!", parent=self)
@@ -2380,6 +2389,9 @@ class RunsheetEditorWindow(tk.Toplevel):
 
     def initial_format_all_comments(self):
         # Run one-time initial formatting on raw comments in unformatted rows
+        if hasattr(self, 'formatted_state_file') and os.path.exists(self.formatted_state_file):
+            return
+            
         comments_col = None
         for i, h in enumerate(self.headers):
             if "comment" in str(h).lower() or "note" in str(h).lower():
@@ -2419,6 +2431,15 @@ class RunsheetEditorWindow(tk.Toplevel):
                 self.wb.save(self.excel_path)
             except Exception as e:
                 print(f"Failed to save initially formatted comments: {e}")
+                
+        # Mark initial formatting as completed for this parcel
+        try:
+            if hasattr(self, 'formatted_state_file'):
+                import json
+                with open(self.formatted_state_file, "w") as f:
+                    json.dump({"initial_formatting_completed": True}, f)
+        except Exception as e:
+            print(f"Failed to write formatting state: {e}")
 
     def _parse_bold_tokens(self, text):
         parts = []
