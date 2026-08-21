@@ -221,8 +221,33 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.canvas.bind("<Configure>", self.on_canvas_configure)
         
         self.bind("<MouseWheel>", self._on_mousewheel)
+        
+        # Row Navigation & Actions Shortcuts
         self.bind("<Command-s>", lambda e: self.save_row())
         self.bind("<Control-s>", lambda e: self.save_row())
+        self.bind("<Command-p>", self.set_status_in_progress)
+        self.bind("<Control-p>", self.set_status_in_progress)
+        self.bind("<Command-n>", self.convert_to_normal_case)
+        self.bind("<Control-n>", self.convert_to_normal_case)
+        self.bind("<Command-l>", lambda e: self.open_phrase_library())
+        self.bind("<Control-l>", lambda e: self.open_phrase_library())
+        
+        # Row Arrow Navigation (Ctrl/Cmd/Alt + Up/Down)
+        self.bind("<Control-Up>", self.nav_prev_row)
+        self.bind("<Control-Down>", self.nav_next_row)
+        self.bind("<Command-Up>", self.nav_prev_row)
+        self.bind("<Command-Down>", self.nav_next_row)
+        self.bind("<Alt-Up>", self.nav_prev_row)
+        self.bind("<Alt-Down>", self.nav_next_row)
+        
+        # Up / Down on Listbox auto-loads row
+        self.listbox.bind("<KeyRelease-Up>", lambda e: self.on_select(None))
+        self.listbox.bind("<KeyRelease-Down>", lambda e: self.on_select(None))
+        
+        # Number shortcuts for inserting phrases (Ctrl+1 .. Ctrl+9, Ctrl+0)
+        for num in range(10):
+            self.bind(f"<Control-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n))
+            self.bind(f"<Command-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n))
         
         self.row_indices = []
         self.load_rows()
@@ -665,7 +690,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.warning_label.bind("<Motion>", lambda e: [self.warning_tooltip.hide_tip(), on_warning_enter(e)] if self.warning_tooltip.tip_window else None)
         
         # Add a tooltip or hint for bolding
-        hint_lbl = ttk.Label(self.form_frame, text="Hint: Select text and press Cmd+B or Ctrl+B to bold in long fields.", font=("Helvetica", 10, "italic"))
+        hint_lbl = ttk.Label(self.form_frame, text="Shortcuts: Ctrl+S (Save) | Ctrl+P (In Progress) | Ctrl+N (Title Case) | Ctrl+L (Phrases) | Ctrl+1..9 (Insert Phrase) | Ctrl+↑/↓ (Prev/Next Row)", font=("Helvetica", 11, "italic"))
         hint_lbl.pack(anchor=tk.E, pady=2, padx=5)
         
         for i, header in enumerate(self.headers):
@@ -2702,6 +2727,118 @@ class RunsheetEditorWindow(tk.Toplevel):
             return txt
         return txt
 
+    def nav_prev_row(self, event=None):
+        sel = self.listbox.curselection()
+        if not sel:
+            if self.row_indices:
+                self.listbox.selection_set(0)
+                self.listbox.see(0)
+                self.on_select(None)
+            return "break"
+        curr_idx = sel[0]
+        if curr_idx > 0:
+            if self.current_row_idx:
+                try: self.save_row(show_msg=False)
+                except Exception: pass
+            new_idx = curr_idx - 1
+            self.listbox.selection_clear(0, tk.END)
+            self.listbox.selection_set(new_idx)
+            self.listbox.see(new_idx)
+            self.on_select(None)
+        return "break"
+
+    def nav_next_row(self, event=None):
+        sel = self.listbox.curselection()
+        if not sel:
+            if self.row_indices:
+                self.listbox.selection_set(0)
+                self.listbox.see(0)
+                self.on_select(None)
+            return "break"
+        curr_idx = sel[0]
+        if curr_idx < len(self.row_indices) - 1:
+            if self.current_row_idx:
+                try: self.save_row(show_msg=False)
+                except Exception: pass
+            new_idx = curr_idx + 1
+            self.listbox.selection_clear(0, tk.END)
+            self.listbox.selection_set(new_idx)
+            self.listbox.see(new_idx)
+            self.on_select(None)
+        return "break"
+
+    def set_status_in_progress(self, event=None):
+        self.status_var.set("In Progress")
+        self.on_status_change(None)
+        return "break"
+
+    def convert_to_normal_case(self, event=None):
+        widget = self.focus_get()
+        if isinstance(widget, tk.Text):
+            try:
+                if widget.tag_ranges(tk.SEL):
+                    sel_text = widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+                    new_text = sel_text.title()
+                    first_idx = widget.index(tk.SEL_FIRST)
+                    widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+                    widget.insert(first_idx, new_text)
+                    widget.tag_add(tk.SEL, first_idx, f"{first_idx}+{len(new_text)}c")
+                else:
+                    txt = widget.get("1.0", "end-1c")
+                    widget.delete("1.0", tk.END)
+                    widget.insert("1.0", txt.title())
+            except Exception: pass
+        elif isinstance(widget, (ttk.Entry, tk.Entry)):
+            try:
+                if widget.selection_present():
+                    start = widget.index(tk.SEL_FIRST)
+                    end = widget.index(tk.SEL_LAST)
+                    sel_text = widget.get()[start:end]
+                    new_text = sel_text.title()
+                    widget.delete(start, end)
+                    widget.insert(start, new_text)
+                    widget.selection_range(start, start + len(new_text))
+                else:
+                    txt = widget.get()
+                    widget.delete(0, tk.END)
+                    widget.insert(0, txt.title())
+            except Exception: pass
+        return "break"
+
+    def insert_phrase_by_num(self, num, event=None):
+        import json
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        phrases_file = os.path.join(app_dir, "phrases.json")
+        default_phrases = [
+            "Dower released.",
+            "No dower mentioned.",
+            "Maturity Date: Not stated.",
+            "No release found of record.",
+            "Prior Ref:"
+        ]
+        phrases = default_phrases[:]
+        if os.path.exists(phrases_file):
+            try:
+                with open(phrases_file, "r") as f:
+                    phrases = json.load(f)
+            except: pass
+
+        idx = 9 if num == 0 else num - 1
+        if 0 <= idx < len(phrases):
+            phrase = phrases[idx]
+            widget = self.focus_get()
+            if isinstance(widget, tk.Text):
+                try:
+                    widget.insert(tk.INSERT, phrase)
+                    self.perform_spellcheck(widget)
+                    self.highlight_links(widget)
+                except Exception: pass
+            elif isinstance(widget, (ttk.Entry, tk.Entry)):
+                try:
+                    widget.insert(tk.INSERT, phrase)
+                except Exception: pass
+        return "break"
+
     def open_phrase_library(self):
         import json
         app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2743,9 +2880,15 @@ class RunsheetEditorWindow(tk.Toplevel):
         
         def refresh_list():
             listbox.delete(0, tk.END)
-            for p in phrases:
+            for idx, p in enumerate(phrases):
                 display_p = p.replace("\n", " ↵ ")
-                listbox.insert(tk.END, display_p)
+                if idx < 9:
+                    num_prefix = f"[{idx + 1}] "
+                elif idx == 9:
+                    num_prefix = "[0] "
+                else:
+                    num_prefix = "     "
+                listbox.insert(tk.END, f"{num_prefix}{display_p}")
                 
         refresh_list()
         
