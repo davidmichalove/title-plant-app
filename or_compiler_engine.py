@@ -409,7 +409,6 @@ class ORCompilerEngine:
             vd = data.get("vesting_deed")
             qtr = data.get("qtr_val", "SE4")
             
-            # Map book types to full records name
             btype_full = "Deed Records"
             if vd:
                 bt = str(vd.get("btype", "")).upper()
@@ -417,12 +416,8 @@ class ORCompilerEngine:
                 elif "MR" in bt or "MORTGAGE" in bt: btype_full = "Mortgage Records"
                 else: btype_full = "Deed Records"
                 
-            repl_map = {
-                "QUARTER CALL": qtr,
-                "<QTR>": qtr,
-                "<QUARTER>": qtr,
-                "<QTR_CALL>": qtr,
-            }
+            new_b3 = b3_val
+            new_b3 = new_b3.replace("QUARTER CALL", qtr).replace("<QTR>", qtr).replace("<QUARTER>", qtr).replace("<QTR_CALL>", qtr)
             
             if vd:
                 v_itype = str(vd.get("itype", "Deed")).strip()
@@ -432,26 +427,20 @@ class ORCompilerEngine:
                 v_vol = str(vd.get("vol", "XX")).strip()
                 v_pg = str(vd.get("pg", "XX")).strip()
                 
-                repl_map.update({
-                    "Instrument Type": v_itype,
-                    "<INST_TYPE>": v_itype,
-                    "from Grantor to Grantee": f"from {v_grantor} to {v_grantee}",
-                    "<GRANTOR>": v_grantor,
-                    "<GRANTEE>": v_grantee,
-                    "effective date XX/XX/XXXX": f"effective date {v_eff_dt}",
-                    "<EFF_DATE>": v_eff_dt,
-                    "Volume XX": f"Volume {v_vol}",
-                    "<VOL>": v_vol,
-                    "Page XX": f"Page {v_pg}",
-                    "<PG>": v_pg,
-                    "Record Type Records": btype_full,
-                    "Record Type": btype_full.replace(" Records", ""),
-                    "<REC_TYPE>": btype_full
-                })
+                # Clean replacements
+                new_b3 = new_b3.replace("<INST_TYPE>", v_itype).replace("Instrument Type", v_itype)
+                new_b3 = new_b3.replace("<GRANTOR>", v_grantor).replace("from Grantor to Grantee", f"from {v_grantor} to {v_grantee}").replace("Grantor", v_grantor)
+                new_b3 = new_b3.replace("<GRANTEE>", v_grantee).replace("Grantee", v_grantee)
+                new_b3 = new_b3.replace("effective date XX/XX/XXXX", f"effective date {v_eff_dt}").replace("<EFF_DATE>", v_eff_dt)
                 
-            new_b3 = b3_val
-            for old_k, new_v in repl_map.items():
-                new_b3 = new_b3.replace(old_k, new_v)
+                # Volume & Page
+                new_b3 = new_b3.replace("Volume <VOL>", f"Volume {v_vol}").replace("Vol <VOL>", f"Vol {v_vol}").replace("Volume XX", f"Volume {v_vol}").replace("<VOL>", f"Volume {v_vol}")
+                new_b3 = new_b3.replace("Page <PG>", f"Page {v_pg}").replace("Pg <PG>", f"Page {v_pg}").replace("Page XX", f"Page {v_pg}").replace("<PG>", f"Page {v_pg}")
+                new_b3 = new_b3.replace("Volume Volume", "Volume").replace("Page Page", "Page")
+                
+                # Record Type
+                new_b3 = new_b3.replace("<REC_TYPE>", btype_full).replace("Record Type Records", btype_full).replace("Record Type", btype_full.replace(" Records", ""))
+                
             ws["B3"] = new_b3
 
         # 2. Date Range in cell B62 (or finding "RECORDS EXAMINED FROM AND TO:")
