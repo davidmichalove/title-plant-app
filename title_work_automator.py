@@ -4285,6 +4285,7 @@ end tell'''
             ("Cmd + R / Ctrl + R", "Main Portal", "Open Belmont Recorder website (Kofile)"),
             
             # Editor
+            ("Cmd+Shift+O / Ctrl+Shift+O", "RS / Gemini", "📊 Sync Runsheet to Ownership Report (*OR*.xlsx)"),
             ("Cmd + S / Ctrl + S", "RS Editor", "Save current row & Excel workbook"),
             ("Cmd + G / Ctrl + G", "Gemini Editor", "✨ Draft active row with Gemini AI"),
             ("Cmd + A / Ctrl + A", "RS / Gemini", "View Gemini Source Provenance, Quotes, & Warnings"),

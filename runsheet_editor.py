@@ -207,6 +207,9 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.reformat_btn = ttk.Button(bottom_bar, text="Reformat Comments", command=self.confirm_and_reformat_all)
         self.reformat_btn.pack(side=tk.LEFT, padx=(10, 0))
         
+        self.sync_or_btn = ttk.Button(bottom_bar, text="📊 Sync OR", command=self.open_or_sync_dialog)
+        self.sync_or_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
         self.shortcuts_btn = ttk.Button(bottom_bar, text="⌨️ Shortcuts", command=self.show_shortcuts_dialog)
         self.shortcuts_btn.pack(side=tk.RIGHT)
         
@@ -238,6 +241,11 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.bind("<Command-Shift-a>", self.show_ai_note_dialog)
         self.bind("<Control-Shift-A>", self.show_ai_note_dialog)
         self.bind("<Control-Shift-a>", self.show_ai_note_dialog)
+
+        self.bind("<Command-Shift-O>", self.open_or_sync_dialog)
+        self.bind("<Command-Shift-o>", self.open_or_sync_dialog)
+        self.bind("<Control-Shift-O>", self.open_or_sync_dialog)
+        self.bind("<Control-Shift-o>", self.open_or_sync_dialog)
         self.bind("<Command-d>", self.toggle_dower_reviewed)
         self.bind("<Control-d>", self.toggle_dower_reviewed)
         
@@ -3118,6 +3126,11 @@ class RunsheetEditorWindow(tk.Toplevel):
         
         return "break"
 
+    def open_or_sync_dialog(self, event=None):
+        import or_sync_dialog
+        or_sync_dialog.ORSyncDialog(self, self.pid_dir, self.pid)
+        return "break"
+
     def show_shortcuts_dialog(self):
         popup = tk.Toplevel(self)
         popup.title("Keyboard Shortcuts")
@@ -3136,7 +3149,8 @@ class RunsheetEditorWindow(tk.Toplevel):
             ("Ctrl + F / Cmd + F", "Set status to 'Completed'"),
             ("Ctrl + A / Cmd + A", "View Gemini AI Note & Error Bar Details"),
             ("Ctrl + D / Cmd + D", "Toggle 'Dower Reviewed' checkbox"),
-            ("Cmd+Shift+D / Cmd+Shift+O", "Delete '--- Original ---' notes block"),
+            ("Cmd+Shift+O / Ctrl+Shift+O", "📊 Sync data to Ownership Report (*OR*.xlsx)"),
+            ("Cmd+Shift+D", "Delete '--- Original ---' notes block"),
             ("Ctrl + O / Cmd + O", "Open Document (PDF for current row)"),
             ("Ctrl + N / Cmd + N", "Convert selection or field to Title Case"),
             ("Ctrl + L / Cmd + L", "Open Phrase Library window"),
