@@ -9,8 +9,8 @@ class ORSyncDialog(tk.Toplevel):
     def __init__(self, master, pid_dir, parcel_num=None, rs_path=None):
         super().__init__(master)
         self.title("📊 Ownership Report (OR) Auto-Compiler & Sync")
-        self.geometry("850x680")
-        self.minsize(700, 500)
+        self.geometry("880x730")
+        self.minsize(720, 520)
         self.transient(master)
         self.attributes("-topmost", True)
 
@@ -57,12 +57,12 @@ class ORSyncDialog(tk.Toplevel):
         tab_leases = ttk.Frame(self.notebook, padding=10)
         tab_mortgages = ttk.Frame(self.notebook, padding=10)
 
-        self.notebook.add(tab_owners, text="🏠 Surface & Mineral Owners")
+        self.notebook.add(tab_owners, text="🏠 Owners & Cleanup")
         self.notebook.add(tab_easements, text=f"🛣️ Easements ({len(self.data['easements'])})")
         self.notebook.add(tab_leases, text=f"🛢️ O&G Leases ({len(self.data['leases'])})")
         self.notebook.add(tab_mortgages, text=f"🏦 Mortgages ({len(self.data['mortgages'])})")
 
-        # --- TAB 1: OWNERS ---
+        # --- TAB 1: OWNERS & CLEANUP OPTIONS ---
         so = self.data["surface_owner"]
         ttk.Label(tab_owners, text="Surface Owner (Vesting Grantee):", font=("Helvetica", 11, "bold")).grid(row=0, column=0, sticky="w", pady=2)
         self.so_name_var = tk.StringVar(value=so.get("name", ""))
@@ -89,23 +89,36 @@ class ORSyncDialog(tk.Toplevel):
 
         ttk.Separator(tab_owners, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=10)
 
+        # Quick Cleanup Options Section
+        opt_frame = ttk.LabelFrame(tab_owners, text="⚡ Quick Excel Cleanup & Formatting", padding=10)
+        opt_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
+
         self.sync_mineral_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tab_owners, text="Mirror Mineral Ownership to match Surface Owner (100% Fee Simple)", variable=self.sync_mineral_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=5)
+        ttk.Checkbutton(opt_frame, text="✅ Mirror Mineral Ownership to match Surface Owner (100% Fee Simple)", variable=self.sync_mineral_var).pack(anchor="w", pady=3)
+
+        self.sole_mineral_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt_frame, text="🗑️ Sole Mineral Holder Only: Delete 'Jim Doe' placeholder block (Rows 32–40) & set to 100%", variable=self.sole_mineral_var).pack(anchor="w", pady=3)
+
+        self.no_leasehold_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt_frame, text="🛢️ No Leasehold: Write 'OPEN OF RECORD' in Col J & Delete 'Leasehold Schedule A' tab", variable=self.no_leasehold_var).pack(anchor="w", pady=3)
+
+        self.delete_notes_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt_frame, text="📝 Delete Notes Block: Delete Rows 42–46 (NOTE #1 / Add note text here)", variable=self.delete_notes_var).pack(anchor="w", pady=3)
 
         # --- TAB 2: EASEMENTS ---
-        ttk.Label(tab_easements, text="Detected Easements & Rights of Way to include in OR:", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(tab_easements, text="Detected Easements to write as 'BookType Vol/Pg':", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
         self.easement_vars = []
         if not self.data["easements"]:
-            ttk.Label(tab_easements, text="No Easements or Rights of Way found (will write '1) None').", font=("Helvetica", 11, "italic")).pack(anchor="w", pady=5)
+            ttk.Label(tab_easements, text="No Easements found (will write '1) None').", font=("Helvetica", 11, "italic")).pack(anchor="w", pady=5)
         else:
             for idx, e in enumerate(self.data["easements"]):
                 var = tk.BooleanVar(value=e["included"])
                 self.easement_vars.append((var, e))
-                cb = ttk.Checkbutton(tab_easements, text=f"Row {e['row']['row_idx']}: {e['summary']}", variable=var)
+                cb = ttk.Checkbutton(tab_easements, text=f"Row {e['row']['row_idx']}: {e['summary']} ({e['row']['grantor']} -> {e['row']['grantee']})", variable=var)
                 cb.pack(anchor="w", pady=3)
 
         # --- TAB 3: LEASES ---
-        ttk.Label(tab_leases, text="Detected Oil & Gas Leases to include in OR:", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(tab_leases, text="Detected Oil & Gas Leases to write as 'BookType Vol/Pg':", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
         self.lease_vars = []
         if not self.data["leases"]:
             ttk.Label(tab_leases, text="No Oil & Gas Leases found (will write '1) None').", font=("Helvetica", 11, "italic")).pack(anchor="w", pady=5)
@@ -113,7 +126,7 @@ class ORSyncDialog(tk.Toplevel):
             for idx, l in enumerate(self.data["leases"]):
                 var = tk.BooleanVar(value=l["included"])
                 self.lease_vars.append((var, l))
-                cb = ttk.Checkbutton(tab_leases, text=f"Row {l['row']['row_idx']}: {l['summary']}", variable=var)
+                cb = ttk.Checkbutton(tab_leases, text=f"Row {l['row']['row_idx']}: {l['summary']} ({l['row']['grantor']} -> {l['row']['grantee']})", variable=var)
                 cb.pack(anchor="w", pady=3)
 
         # --- TAB 4: MORTGAGES ---
@@ -126,7 +139,7 @@ class ORSyncDialog(tk.Toplevel):
                 var = tk.BooleanVar(value=m["included"])
                 self.mortgage_vars.append((var, m))
                 tag = "⭐ [UNRELEASED]" if not m["is_satisfied"] else " [Satisfied / Released]"
-                cb = ttk.Checkbutton(tab_mortgages, text=f"Row {m['row']['row_idx']} {tag}: {m['summary']}", variable=var)
+                cb = ttk.Checkbutton(tab_mortgages, text=f"Row {m['row']['row_idx']} {tag}: {m['summary']} ({m['row']['grantor']})", variable=var)
                 cb.pack(anchor="w", pady=3)
 
         # 3. Bottom Action Bar
@@ -171,6 +184,10 @@ class ORSyncDialog(tk.Toplevel):
 
         if self.sync_mineral_var.get():
             self.data["mineral_owner"] = dict(self.data["surface_owner"])
+
+        self.data["sole_mineral_owner"] = self.sole_mineral_var.get()
+        self.data["no_leasehold"] = self.no_leasehold_var.get()
+        self.data["delete_notes"] = self.delete_notes_var.get()
 
         for var, e in self.easement_vars:
             e["included"] = var.get()

@@ -62,13 +62,11 @@ def calculate_quarter_section(parcel_num):
                 
             if len(p_matches) > 0:
                 p_row = p_matches.iloc[0]
-                # 1. Check desc_
                 desc_str = str(p_row.get("desc_", "") or "")
                 m_q = re.search(r'\b(NW|NE|SW|SE)\b', desc_str, re.IGNORECASE)
                 if m_q:
                     return f"{m_q.group(1).upper()}4"
                     
-                # 2. Geometric calculation
                 p_geom = p_row.geometry
                 if p_geom is not None and os.path.exists(plss_shp):
                     plss_gdf = gpd.read_file(plss_shp)
@@ -316,7 +314,7 @@ class ORCompilerEngine:
         # 5. Quarter Section Calculation
         qtr_val = calculate_quarter_section(parcel_num)
         
-        # 6. Encumbrances Scanning (Clean Short Format: "Instrument Type, BookType Vol/Pg")
+        # 6. Encumbrances Scanning (Clean Short Format: "BookType Vol/Pg")
         # A) Easements
         easement_rows = []
         for r in rows:
@@ -394,7 +392,10 @@ class ORCompilerEngine:
             },
             "easements": easement_rows,
             "leases": lease_rows,
-            "mortgages": mortgage_rows
+            "mortgages": mortgage_rows,
+            "sole_mineral_owner": True,
+            "no_leasehold": True,
+            "delete_notes": True
         }
 
     @classmethod
@@ -429,18 +430,15 @@ class ORCompilerEngine:
                 v_vol = str(vd.get("vol", "XX")).strip()
                 v_pg = str(vd.get("pg", "XX")).strip()
                 
-                # Clean replacements
                 new_b3 = new_b3.replace("<INST_TYPE>", v_itype).replace("Instrument Type", v_itype)
                 new_b3 = new_b3.replace("<GRANTOR>", v_grantor).replace("from Grantor to Grantee", f"from {v_grantor} to {v_grantee}").replace("Grantor", v_grantor)
                 new_b3 = new_b3.replace("<GRANTEE>", v_grantee).replace("Grantee", v_grantee)
                 new_b3 = new_b3.replace("effective date XX/XX/XXXX", f"effective date {v_eff_dt}").replace("<EFF_DATE>", v_eff_dt)
                 
-                # Volume & Page
                 new_b3 = new_b3.replace("Volume <VOL>", f"Volume {v_vol}").replace("Vol <VOL>", f"Vol {v_vol}").replace("Volume XX", f"Volume {v_vol}").replace("<VOL>", f"Volume {v_vol}")
                 new_b3 = new_b3.replace("Page <PG>", f"Page {v_pg}").replace("Pg <PG>", f"Page {v_pg}").replace("Page XX", f"Page {v_pg}").replace("<PG>", f"Page {v_pg}")
                 new_b3 = new_b3.replace("Volume Volume", "Volume").replace("Page Page", "Page")
                 
-                # Record Type
                 new_b3 = new_b3.replace("<REC_TYPE>", btype_full).replace("Record Type Records", btype_full).replace("Record Type", btype_full.replace(" Records", ""))
                 
             ws["B3"] = new_b3
@@ -461,7 +459,7 @@ class ORCompilerEngine:
         if not date_cell_found:
             ws.cell(62, 2, date_str)
             
-        # 3. Prepared By (Row 61: AGENT NAME -> DAVID MICHALOVE)
+        # 3. Prepared By (Row 61: <AGENT> / AGENT NAME -> DAVID MICHALOVE)
         for r in range(50, ws.max_row + 1):
             for c in range(1, 4):
                 val_str = str(ws.cell(r, c).value or '')
@@ -495,10 +493,35 @@ class ORCompilerEngine:
             if len(addrs) > 1: ws.cell(26, 1, addrs[1])
             if mo.get("year"): ws.cell(27, 1, mo["year"])
             ws.cell(23, 3, mo.get("interest", 1))
+
+        # 6. Sole Mineral Owner -> Clear Jim Doe placeholder (Rows 32 to 40)
+        if data.get("sole_mineral_owner", True):
+            for r in range(32, 41):
+                for c in range(1, 15):
+                    ws.cell(r, c).value = None
+            ws.cell(23, 3).value = 1.0
+
+        # 7. No Leasehold -> Set J23 to OPEN OF RECORD & delete Leasehold Schedule tab
+        if data.get("no_leasehold", True):
+            ws.cell(23, 10, "OPEN OF RECORD")
+            for r in range(24, 32):
+                ws.cell(r, 10).value = None
+            if "Leasehold Schedule A" in wb.sheetnames:
+                wb.remove(wb["Leasehold Schedule A"])
             
-        # 6. Easements (Row 52)
+        # 8. Delete Notes Block (Rows 42 to 46)
+        if data.get("delete_notes", True):
+            note_row = None
+            for r in range(40, 52):
+                if ws.cell(r, 1).value and "NOTE #" in str(ws.cell(r, 1).value):
+                    note_row = r
+                    break
+            if note_row:
+                ws.delete_rows(note_row - 2, 5)
+
+        # 9. Easements
         inc_easements = [e["summary"] for e in data.get("easements", []) if e.get("included")]
-        for r in range(45, 60):
+        for r in range(40, ws.max_row + 1):
             if ws.cell(r, 1).value and "EASEMENTS & RIGHTS OF WAY" in str(ws.cell(r, 1).value):
                 if inc_easements:
                     txt = "\n".join([f"{i+1}) {s}" for i, s in enumerate(inc_easements)])
@@ -507,9 +530,9 @@ class ORCompilerEngine:
                     ws.cell(r + 1, 1, "1) None")
                 break
                 
-        # 7. Oil & Gas Leases (Row 55)
+        # 10. Oil & Gas Leases
         inc_leases = [l["summary"] for l in data.get("leases", []) if l.get("included")]
-        for r in range(48, 60):
+        for r in range(40, ws.max_row + 1):
             if ws.cell(r, 1).value and "UNRELEASED OIL & GAS LEASES" in str(ws.cell(r, 1).value):
                 if inc_leases:
                     txt = "\n".join([f"{i+1}) {s}" for i, s in enumerate(inc_leases)])
@@ -518,9 +541,9 @@ class ORCompilerEngine:
                     ws.cell(r + 1, 1, "1) None")
                 break
                 
-        # 8. Unreleased Mortgages (Row 58)
+        # 11. Unreleased Mortgages
         inc_mortgages = [m["summary"] for m in data.get("mortgages", []) if m.get("included")]
-        for r in range(50, 62):
+        for r in range(40, ws.max_row + 1):
             if ws.cell(r, 1).value and "UNRELEASED MORTGAGES" in str(ws.cell(r, 1).value):
                 if inc_mortgages:
                     txt = "\n".join([f"{i+1}) {s}" for i, s in enumerate(inc_mortgages)])
