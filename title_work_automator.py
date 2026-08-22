@@ -178,6 +178,8 @@ class AutomatorApp:
         self.rs_editor_btn.pack(side=tk.LEFT, padx=5)
         self.gemini_rs_btn = ttk.Button(btn_container_bottom, text="✨ Edit Gemini RS", command=self.open_gemini_rs_editor)
         self.gemini_rs_btn.pack(side=tk.LEFT, padx=5)
+        self.gis_browser_btn = ttk.Button(btn_container_bottom, text="🗺️ Belmont GIS", command=self.open_belmont_gis)
+        self.gis_browser_btn.pack(side=tk.LEFT, padx=5)
         self.name_search_btn = ttk.Button(btn_container_bottom, text="General Name Search", command=self.open_name_search)
         self.name_search_btn.pack(side=tk.LEFT, padx=5)
 
@@ -495,11 +497,16 @@ class AutomatorApp:
         self.parcel_entry.bind('<<ComboboxSelected>>', lambda e: self.on_parcel_change())
         self.parcel_entry.bind('<KeyRelease>', lambda e: self.on_parcel_change())
         
-        # Shortcut to Open Ownership Report Excel (Command+O / Ctrl+O)
+        # Shortcuts (Command+O for Ownership Report, Command+G for Belmont GIS)
         self.root.bind("<Command-o>", self.open_ownership_report)
         self.root.bind("<Control-o>", self.open_ownership_report)
         self.root.bind("<Command-O>", self.open_ownership_report)
         self.root.bind("<Control-O>", self.open_ownership_report)
+
+        self.root.bind("<Command-g>", self.open_belmont_gis)
+        self.root.bind("<Control-g>", self.open_belmont_gis)
+        self.root.bind("<Command-G>", self.open_belmont_gis)
+        self.root.bind("<Control-G>", self.open_belmont_gis)
 
     def refresh_recent_parcels(self):
         import glob
@@ -4156,6 +4163,31 @@ end tell'''
             
         ttk.Button(dialog, text="Save to Notes", command=on_save).grid(row=4, column=0, columnspan=2, pady=15)
         
+    def open_belmont_gis(self, event=None):
+        raw_p_num = self.parcel_entry.get().strip()
+        if not raw_p_num:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Please enter or select a Parcel Number (PID) first.")
+            return "break"
+
+        import re, webbrowser
+        m = re.search(r'\d{2}-\d{5}\.\d{3}', raw_p_num)
+        if m:
+            clean_parcel = m.group(0)
+        else:
+            clean_parcel = raw_p_num.split()[0].replace("PID", "").strip()
+
+        gis_url = f"https://gis.belcogis.com/ParcelMap/#widget_48=text:{clean_parcel}&zoom_to_selection=true"
+
+        try:
+            webbrowser.open_new_tab(gis_url)
+            self.log(f"🗺️ Opened Belmont County GIS for Parcel: {clean_parcel}")
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Could not open Belmont GIS URL:\n{e}")
+
+        return "break"
+
     def open_ownership_report(self, event=None):
         pid = self.parcel_entry.get().strip()
         if not pid:
