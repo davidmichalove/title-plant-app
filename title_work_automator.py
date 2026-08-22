@@ -193,9 +193,17 @@ class AutomatorApp:
         self.notebook.add(tab_tools, text="Tools")
         
         # --- TOOLS TAB CONTENT ---
-        gis_frame = ttk.Frame(tab_tools)
-        gis_frame.grid(row=99, column=0, columnspan=2, pady=10)
-        ttk.Label(gis_frame, text="Manual Utilities:").pack(pady=5)
+        tools_container = ttk.Frame(tab_tools, padding=15)
+        tools_container.pack(fill=tk.BOTH, expand=True)
+
+        plat_box = ttk.LabelFrame(tools_container, text="📑 Plat Cabinet Searcher (Belmont County Plats)", padding=10)
+        plat_box.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(plat_box, text="Search 2,970+ Plat Cabinets (Cabinets A-F & Plat slides) by subdivision name or slide number.", wraplength=450).pack(anchor=tk.W, pady=(0, 8))
+        ttk.Button(plat_box, text="📑 Open Plat Cabinet Searcher", command=self.open_plat_cabinet_searcher).pack(anchor=tk.W)
+
+        gis_box = ttk.LabelFrame(tools_container, text="🗺️ GIS & Mapping Utilities", padding=10)
+        gis_box.pack(fill=tk.X, pady=(0, 15))
         
         def run_manual_gis():
             p_num = self.parcel_entry.get().strip()
@@ -203,13 +211,11 @@ class AutomatorApp:
                 messagebox.showerror("Error", "Please enter a Parcel Number in the main tab first!")
                 return
             
-            # Run the GIS script as a background subprocess so it doesn't freeze the GUI!
             import subprocess
             import threading
             
             def background_gis():
                 base_dir = "/Volumes/davidlls/assignments"
-                # Save to MAPS folder by default
                 maps_dir = os.path.join(base_dir, f"PID {p_num}", "MAPS")
                 if not os.path.exists(maps_dir):
                     os.makedirs(maps_dir)
@@ -220,7 +226,7 @@ class AutomatorApp:
             threading.Thread(target=background_gis, daemon=True).start()
             messagebox.showinfo("Started", f"GIS Map generation for {p_num} started in the background!\n\nThe PDF will automatically pop open on your screen in about 60 seconds once it finishes.")
 
-        ttk.Button(gis_frame, text="Generate Professional GIS Map", command=run_manual_gis).pack(pady=5)
+        ttk.Button(gis_box, text="Generate Professional GIS Map", command=run_manual_gis).pack(anchor=tk.W)
         # -------------------------
         
         tab_notes = ttk.Frame(self.notebook)
@@ -4163,6 +4169,13 @@ end tell'''
             
         ttk.Button(dialog, text="Save to Notes", command=on_save).grid(row=4, column=0, columnspan=2, pady=15)
         
+    def open_plat_cabinet_searcher(self):
+        pid = self.parcel_entry.get().strip()
+        pid_dir = self.get_parcel_dir(pid) if pid and os.path.exists(self.get_parcel_dir(pid)) else None
+        
+        import plat_cabinet_searcher
+        plat_cabinet_searcher.PlatCabinetSearchWindow(self.root, parcel_dir=pid_dir)
+
     def open_belmont_gis(self, event=None):
         raw_p_num = self.parcel_entry.get().strip()
         if not raw_p_num:
