@@ -168,6 +168,8 @@ class AutomatorApp:
         self.status_btn.pack(side=tk.LEFT, padx=5)
         self.open_or_btn = ttk.Button(btn_container_top, text="📊 Open OR Excel", command=self.open_ownership_report)
         self.open_or_btn.pack(side=tk.LEFT, padx=5)
+        self.recorder_btn = ttk.Button(btn_container_top, text="🏛️ Belmont Recorder", command=self.open_belmont_recorder)
+        self.recorder_btn.pack(side=tk.LEFT, padx=5)
 
         btn_container_bottom = ttk.Frame(frame)
         btn_container_bottom.grid(row=2, column=0, columnspan=2, pady=(0, 10))
@@ -518,6 +520,11 @@ class AutomatorApp:
         self.root.bind("<Control-g>", self.open_belmont_gis)
         self.root.bind("<Command-G>", self.open_belmont_gis)
         self.root.bind("<Control-G>", self.open_belmont_gis)
+
+        self.root.bind("<Command-r>", self.open_belmont_recorder)
+        self.root.bind("<Control-r>", self.open_belmont_recorder)
+        self.root.bind("<Command-R>", self.open_belmont_recorder)
+        self.root.bind("<Control-R>", self.open_belmont_recorder)
 
     def refresh_recent_parcels(self):
         import glob
@@ -4187,6 +4194,17 @@ end tell'''
         
         import plat_cabinet_searcher
         plat_cabinet_searcher.PlatCabinetSearchWindow(self.root, parcel_dir=pid_dir)
+
+    def open_belmont_recorder(self, event=None):
+        recorder_url = "https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH"
+        import webbrowser
+        try:
+            webbrowser.open_new_tab(recorder_url)
+            self.log("🏛️ Opened Belmont County Recorder (Kofile) in browser.")
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Could not open Recorder website:\n{e}")
+        return "break"
 
     def open_belmont_gis(self, event=None):
         raw_p_num = self.parcel_entry.get().strip()
