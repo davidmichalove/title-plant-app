@@ -2584,6 +2584,46 @@ class AutomatorApp:
                 shutil.copy(TEMPLATE_2, target_template_2)
             self.log("Copied Excel templates.")
             
+            # Calculate Quarter Section
+            qtr_val = ""
+            try:
+                import re
+                desc_str = str(parcel_data.get('desc_', '') or '')
+                m_q = re.search(r'\b(NW|NE|SW|SE)\b', desc_str, re.IGNORECASE)
+                if m_q:
+                    qtr_val = f"{m_q.group(1).upper()}4"
+                else:
+                    p_geom = parcel_data.geometry if hasattr(parcel_data, 'geometry') else None
+                    if p_geom is not None:
+                        plss_shp = "/Volumes/davidlls/various_GIS_shapefiles/OH-CADNSDI-v2_SPSNAD83/PLSSFirstDivision.shp"
+                        if os.path.exists(plss_shp):
+                            import geopandas as gpd
+                            from shapely.geometry import box
+                            plss_gdf = gpd.read_file(plss_shp)
+                            m_secs = plss_gdf[plss_gdf.intersects(p_geom)]
+                            for _, sec_row in m_secs.iterrows():
+                                minx, miny, maxx, maxy = sec_row.geometry.bounds
+                                midx = (minx + maxx) / 2.0
+                                midy = (miny + maxy) / 2.0
+                                q_boxes = {
+                                    "NW": box(minx, midy, midx, maxy),
+                                    "NE": box(midx, midy, maxx, maxy),
+                                    "SW": box(minx, miny, midx, midy),
+                                    "SE": box(midx, miny, maxx, midy),
+                                }
+                                overlaps = {}
+                                for q_code, q_box in q_boxes.items():
+                                    if p_geom.intersects(q_box):
+                                        overlaps[q_code] = p_geom.intersection(q_box).area
+                                if overlaps:
+                                    best_q = max(overlaps, key=overlaps.get)
+                                    qtr_val = f"{best_q}4"
+                                    break
+                if qtr_val:
+                    self.log(f"Calculated Quarter Section: {qtr_val}")
+            except Exception as e:
+                self.log(f"Note: Could not calculate quarter section: {e}")
+
             # Autofill Excel templates
             try:
                 import openpyxl
@@ -2593,6 +2633,10 @@ class AutomatorApp:
                     "<PIN>": str(pin),
                     "<SEC>": str(sec),
                     "<TWP>": str(twp),
+                    "<QTR>": str(qtr_val),
+                    "<QUARTER>": str(qtr_val),
+                    "<QTR_CALL>": str(qtr_val),
+                    "QUARTER CALL": str(qtr_val),
                     "<VOL>": str(vol_val),
                     "<PG>": str(pg_val),
                     "<ACRES_IN2>": str(gis_ac),
