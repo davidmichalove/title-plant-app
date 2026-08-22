@@ -193,17 +193,16 @@ class AutomatorApp:
         self.notebook.add(tab_tools, text="Tools")
         
         # --- TOOLS TAB CONTENT ---
-        tools_container = ttk.Frame(tab_tools, padding=15)
-        tools_container.pack(fill=tk.BOTH, expand=True)
-
-        plat_box = ttk.LabelFrame(tools_container, text="📑 Plat Cabinet Searcher (Belmont County Plats)", padding=10)
-        plat_box.pack(fill=tk.X, pady=(0, 15))
+        plat_frame = ttk.Frame(tab_tools)
+        plat_frame.grid(row=98, column=0, columnspan=2, pady=(15, 5), sticky="w", padx=10)
         
-        ttk.Label(plat_box, text="Search 2,970+ Plat Cabinets (Cabinets A-F & Plat slides) by subdivision name or slide number.", wraplength=450).pack(anchor=tk.W, pady=(0, 8))
-        ttk.Button(plat_box, text="📑 Open Plat Cabinet Searcher", command=self.open_plat_cabinet_searcher).pack(anchor=tk.W)
+        ttk.Label(plat_frame, text="Belmont Plat Cabinet Searcher:", font=("Helvetica", 12, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(plat_frame, text="Search 2,970+ Plat Cabinets (Cabinets A-F & Plat slides) by subdivision name or slide number.", wraplength=450).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Button(plat_frame, text="📑 Open Plat Cabinet Searcher", command=self.open_plat_cabinet_searcher).pack(anchor=tk.W)
 
-        gis_box = ttk.LabelFrame(tools_container, text="🗺️ GIS & Mapping Utilities", padding=10)
-        gis_box.pack(fill=tk.X, pady=(0, 15))
+        gis_frame = ttk.Frame(tab_tools)
+        gis_frame.grid(row=99, column=0, columnspan=2, pady=10, sticky="w", padx=10)
+        ttk.Label(gis_frame, text="Manual Utilities:", font=("Helvetica", 12, "bold")).pack(anchor=tk.W, pady=(0, 2))
         
         def run_manual_gis():
             p_num = self.parcel_entry.get().strip()
@@ -226,7 +225,7 @@ class AutomatorApp:
             threading.Thread(target=background_gis, daemon=True).start()
             messagebox.showinfo("Started", f"GIS Map generation for {p_num} started in the background!\n\nThe PDF will automatically pop open on your screen in about 60 seconds once it finishes.")
 
-        ttk.Button(gis_box, text="Generate Professional GIS Map", command=run_manual_gis).pack(anchor=tk.W)
+        ttk.Button(gis_frame, text="Generate Professional GIS Map", command=run_manual_gis).pack(anchor=tk.W)
         # -------------------------
         
         tab_notes = ttk.Frame(self.notebook)
