@@ -154,16 +154,18 @@ def get_gis_owner_info(parcel_num):
     return {}
 
 def format_encumbrance_short(r):
-    itype = r["itype"]
-    btype = r["btype"]
-    vol = r["vol"]
-    pg = r["pg"]
+    btype = str(r.get("btype", "")).strip()
+    vol = str(r.get("vol", "")).strip()
+    pg = str(r.get("pg", "")).strip()
+    inst = str(r.get("inst_num", "")).strip()
     if vol and pg and vol.lower() != "na" and pg.lower() != "na":
-        return f"{itype}, {btype} {vol}/{pg}"
+        return f"{btype} {vol}/{pg}"
     elif vol and vol.lower() != "na":
-        return f"{itype}, {btype} {vol}"
+        return f"{btype} {vol}"
+    elif inst and inst.lower() != "na":
+        return f"Inst #{inst}"
     else:
-        return f"{itype}"
+        return str(r.get("itype", "Doc")).strip()
 
 class ORCompilerEngine:
     @classmethod
