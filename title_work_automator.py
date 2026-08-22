@@ -528,6 +528,11 @@ class AutomatorApp:
         self.root.bind("<Command-R>", self.open_belmont_recorder)
         self.root.bind("<Control-R>", self.open_belmont_recorder)
 
+        self.root.bind("<Command-e>", self.open_rs_editor)
+        self.root.bind("<Control-e>", self.open_rs_editor)
+        self.root.bind("<Command-E>", self.open_rs_editor)
+        self.root.bind("<Control-E>", self.open_rs_editor)
+
     def refresh_recent_parcels(self):
         import glob
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -4230,6 +4235,7 @@ end tell'''
 
         shortcuts = [
             # Main Portal
+            ("Cmd + E / Ctrl + E", "Main Portal", "Open Runsheet Form Editor (Edit RS)"),
             ("Cmd + O / Ctrl + O", "Main Portal", "Open active parcel's Ownership Report (*OR*.xlsx)"),
             ("Cmd + G / Ctrl + G", "Main Portal", "Open Belmont GIS zoomed to active parcel"),
             ("Cmd + R / Ctrl + R", "Main Portal", "Open Belmont Recorder website (Kofile)"),
@@ -4361,15 +4367,16 @@ end tell'''
         import gemini_runsheet_editor
         gemini_runsheet_editor.GeminiRunsheetEditorWindow(self.root, pid, os.path.dirname(os.path.abspath(__file__)))
 
-    def open_rs_editor(self):
+    def open_rs_editor(self, event=None):
         pid = self.parcel_entry.get().strip()
         if not pid:
             from tkinter import messagebox
             messagebox.showerror("Error", "Please enter a Parcel Number (PID) first.")
-            return
+            return "break"
             
         import runsheet_editor
         runsheet_editor.RunsheetEditorWindow(self.root, pid, os.path.dirname(os.path.abspath(__file__)))
+        return "break" 
         
     def open_status_tracker(self):
         import status_tracker
