@@ -3,10 +3,20 @@ import glob
 import re
 import datetime
 import openpyxl
-from openpyxl.cell.rich_text import CellRichText
 
 BASE_APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SHAPE_FILE_DBF = os.path.join(BASE_APP_DIR, "shape_files", "Belmont_County_Parcels.dbf")
+
+def normalize_parcel_num(p):
+    if not p: return ""
+    p = p.replace("TEST", "").replace("PID", "").strip()
+    m = re.match(r"^(\d+)-(\d+)(\..*)?$", p)
+    if m:
+        dist = m.group(1)
+        num = m.group(2).zfill(5)
+        suf = m.group(3) if m.group(3) else ".000"
+        return f"{dist}-{num}{suf}"
+    return p
 
 def parse_date(date_val):
     if not date_val:
@@ -21,14 +31,12 @@ def parse_date(date_val):
     for fmt in ["%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%y"]:
         try:
             dt = datetime.datetime.strptime(s, fmt)
-            # Normalize 2-digit years
             if dt.year > 2050:
                 dt = dt.replace(year=dt.year - 100)
             return dt.strftime("%m/%d/%Y")
         except ValueError:
             pass
             
-    # Regex extract MM/DD/YYYY
     m = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', s)
     if m:
         mo, day, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -44,6 +52,7 @@ def get_gis_owner_info(parcel_num):
     if not parcel_num or not os.path.exists(SHAPE_FILE_DBF):
         return {}
         
+    norm_p = normalize_parcel_num(parcel_num)
     try:
         import struct
         with open(SHAPE_FILE_DBF, "rb") as f:
@@ -59,7 +68,6 @@ def get_gis_owner_info(parcel_num):
                 fields.append((name, length))
             
             f.seek(header_len)
-            target_clean = parcel_num.strip().upper()
             for _ in range(num_records):
                 rec_bytes = f.read(record_len)
                 if not rec_bytes: break
@@ -70,9 +78,8 @@ def get_gis_owner_info(parcel_num):
                     rec[name] = val
                     offset += length
                 
-                p_no = rec.get("parcel_no", "").strip().upper()
-                if p_no == target_clean or (len(target_clean) > 5 and target_clean in p_no):
-                    # Format address
+                p_no = rec.get("parcel_no", "").strip()
+                if p_no == norm_p or (len(norm_p) > 5 and norm_p in p_no) or (p_no.replace("-","") == norm_p.replace("-","")):
                     add1 = rec.get("ownadd1", "").strip()
                     add2 = rec.get("ownadd2", "").strip()
                     add3 = rec.get("ownadd3", "").strip()
@@ -102,34 +109,78 @@ def get_gis_owner_info(parcel_num):
 
 class ORCompilerEngine:
     @classmethod
-    def compile_data(cls, pid_dir, parcel_num=None):
+    def compile_data(cls, pid_dir, parcel_num=None, rs_path=None):
         if not parcel_num and pid_dir:
             m = re.search(r'PID\s*([0-9\-\.]+)', os.path.basename(pid_dir), re.IGNORECASE)
             if m: parcel_num = m.group(1).strip()
             
-        rs_files = glob.glob(os.path.join(pid_dir, "*RS*.xlsx"))
-        # Exclude temp / backup files
-        valid_rs = [f for f in rs_files if not os.path.basename(f).startswith("~") and not os.path.basename(f).startswith("._") and "backup" not in f.lower() and "blank" not in f.lower()]
-        
-        if not valid_rs:
+        if not rs_path:
+            rs_files = glob.glob(os.path.join(pid_dir, "*RS*.xlsx"))
+            valid_rs = [f for f in rs_files if not os.path.basename(f).startswith("~") and not os.path.basename(f).startswith("._") and "backup" not in f.lower() and "blank" not in f.lower()]
+            if not valid_rs:
+                return None
+            rs_path = valid_rs[0]
+            
+        if not os.path.exists(rs_path):
             return None
             
-        rs_path = valid_rs[0]
         wb = openpyxl.load_workbook(rs_path, data_only=True)
         ws = wb.active
         
+        # 1. Find Header Row dynamically
+        header_row_idx = 1
+        col_map = {}
+        for r in range(1, min(6, ws.max_row + 1)):
+            row_texts = [str(ws.cell(r, c).value or '').strip().lower() for c in range(1, ws.max_column + 1)]
+            if any("instrument" in t for t in row_texts) or any("grantor" in t for t in row_texts):
+                header_row_idx = r
+                for c in range(1, ws.max_column + 1):
+                    val = str(ws.cell(r, c).value or '').strip().lower()
+                    if "instrument type" in val or val == "instrument": col_map["itype"] = c
+                    elif "book type" in val or "book" in val: col_map["btype"] = c
+                    elif "volume" in val or "vol" in val: col_map["vol"] = c
+                    elif "page" in val or "pg" in val: col_map["pg"] = c
+                    elif "instrument number" in val or "inst" in val: col_map["inst_num"] = c
+                    elif "effective date" in val or "effective" in val or "dated" in val: col_map["eff_dt"] = c
+                    elif "filing date" in val or "filed" in val or "recording date" in val: col_map["file_dt"] = c
+                    elif "grantor" in val: col_map["grantor"] = c
+                    elif "grantee" in val: col_map["grantee"] = c
+                    elif "comment" in val or "note" in val: col_map["comments"] = c
+                break
+                
+        # Default fallbacks if header not found
+        if "itype" not in col_map: col_map["itype"] = 1
+        if "btype" not in col_map: col_map["btype"] = 2
+        if "vol" not in col_map: col_map["vol"] = 3
+        if "pg" not in col_map: col_map["pg"] = 4
+        if "inst_num" not in col_map: col_map["inst_num"] = 5
+        if "eff_dt" not in col_map: col_map["eff_dt"] = 6
+        if "file_dt" not in col_map: col_map["file_dt"] = 7
+        if "grantor" not in col_map: col_map["grantor"] = 8
+        if "grantee" not in col_map: col_map["grantee"] = 9
+        if "comments" not in col_map: col_map["comments"] = 12
+        
+        # 2. Extract Data Rows
         rows = []
-        for r in range(2, ws.max_row + 1):
-            itype = str(ws.cell(r, 1).value or '').strip()
-            btype = str(ws.cell(r, 2).value or '').strip()
-            vol = str(ws.cell(r, 3).value or '').strip()
-            pg = str(ws.cell(r, 4).value or '').strip()
-            inst_num = str(ws.cell(r, 5).value or '').strip()
-            eff_dt = ws.cell(r, 6).value
-            file_dt = ws.cell(r, 7).value
-            grantor = str(ws.cell(r, 8).value or '').strip()
-            grantee = str(ws.cell(r, 9).value or '').strip()
-            comments = str(ws.cell(r, 10).value or '').strip()
+        for r in range(header_row_idx + 1, ws.max_row + 1):
+            itype = str(ws.cell(r, col_map["itype"]).value or '').strip()
+            btype = str(ws.cell(r, col_map["btype"]).value or '').strip()
+            vol = str(ws.cell(r, col_map["vol"]).value or '').strip()
+            pg = str(ws.cell(r, col_map["pg"]).value or '').strip()
+            inst_num = str(ws.cell(r, col_map["inst_num"]).value or '').strip()
+            eff_dt = ws.cell(r, col_map["eff_dt"]).value
+            file_dt = ws.cell(r, col_map["file_dt"]).value
+            grantor = str(ws.cell(r, col_map["grantor"]).value or '').strip()
+            grantee = str(ws.cell(r, col_map["grantee"]).value or '').strip()
+            comments = str(ws.cell(r, col_map["comments"]).value or '').strip()
+            
+            # Treat "None" string as empty
+            if itype.lower() == "none": itype = ""
+            if btype.lower() == "none": btype = ""
+            if vol.lower() == "none": vol = ""
+            if pg.lower() == "none": pg = ""
+            if grantor.lower() == "none": grantor = ""
+            if grantee.lower() == "none": grantee = ""
             
             if not any([itype, btype, vol, pg, grantor, grantee]):
                 continue
@@ -155,7 +206,7 @@ class ORCompilerEngine:
         if not rows:
             return None
             
-        # 1. Date Range
+        # 3. Date Range
         all_dates = []
         for r in rows:
             if r["eff_dt"]:
@@ -168,7 +219,7 @@ class ORCompilerEngine:
         earliest_date = all_dates[0][1] if all_dates else "01/01/1900"
         today_date = datetime.date.today().strftime("%m/%d/%Y")
         
-        # 2. Vesting Deed & Surface Owner
+        # 4. Vesting Deed & Surface Owner
         vesting_row = None
         deed_keywords = ["deed", "survivorship", "warranty", "quit claim", "fiduciary", "sheriff", "affidavit for transfer", "certificate of transfer"]
         for r in reversed(rows):
@@ -204,8 +255,8 @@ class ORCompilerEngine:
         if not address_lines:
             address_lines = ["Belmont County, OH"]
             
-        # 3. Encumbrances Scanning
-        # A) Easements & Rights of Way
+        # 5. Encumbrances Scanning
+        # A) Easements
         easement_rows = []
         for r in rows:
             it_l = r["itype"].lower()
@@ -239,15 +290,12 @@ class ORCompilerEngine:
             it_l = r["itype"].lower()
             if "mortgage" in it_l and not any(k in it_l for k in ["satisfaction", "release", "assignment", "modification"]):
                 is_satisfied = False
-                # Check matching volume/page in satisfactions or comments
                 ref_target = f"{r['vol']}-{r['pg']}"
                 for sat in satisfactions:
                     if (r["vol"] and r["vol"] in sat["comments"]) or (r["pg"] and r["pg"] in sat["comments"]) or (ref_target in sat["comments"]):
                         is_satisfied = True
                         break
-                    # Also check if satisfaction date is after mortgage date
                     if sat["grantee"] and r["grantor"] and sat["row_idx"] > r["row_idx"]:
-                        # borrower match
                         b_m = sat["grantee"].split()[0].lower() in r["grantor"].lower()
                         if b_m:
                             is_satisfied = True
@@ -257,12 +305,13 @@ class ORCompilerEngine:
                     "row": r,
                     "summary": summary,
                     "is_satisfied": is_satisfied,
-                    "included": not is_satisfied, # Only unreleased mortgages included by default!
+                    "included": not is_satisfied,
                     "status": "Satisfied" if is_satisfied else "Unreleased"
                 })
                 
         return {
             "pid_dir": pid_dir,
+            "rs_path": rs_path,
             "parcel_num": parcel_num,
             "from_date": earliest_date,
             "to_date": today_date,
@@ -296,11 +345,16 @@ class ORCompilerEngine:
         # 1. Date Range in cell B62 (or finding "RECORDS EXAMINED FROM AND TO:")
         date_str = f"{data['from_date']} TO {data['to_date']}"
         date_cell_found = False
-        for r in range(55, ws.max_row + 1):
-            if ws.cell(r, 1).value and "RECORDS EXAMINED FROM AND TO" in str(ws.cell(r, 1).value):
-                ws.cell(r, 2, date_str)
-                date_cell_found = True
-                break
+        for r in range(50, ws.max_row + 1):
+            for c in range(1, 4):
+                val_str = str(ws.cell(r, c).value or '')
+                if "RECORDS EXAMINED FROM AND TO" in val_str:
+                    target_c = c + 1 if c + 1 <= ws.max_column else 2
+                    ws.cell(r, target_c, date_str)
+                    date_cell_found = True
+                    break
+            if date_cell_found: break
+            
         if not date_cell_found:
             ws.cell(62, 2, date_str)
             

@@ -3128,7 +3128,9 @@ class RunsheetEditorWindow(tk.Toplevel):
 
     def open_or_sync_dialog(self, event=None):
         import or_sync_dialog
-        or_sync_dialog.ORSyncDialog(self, self.pid_dir, self.pid)
+        p_id = getattr(self, 'parcel_id', getattr(self, 'pid', ''))
+        rs_file = getattr(self, 'excel_path', None)
+        or_sync_dialog.ORSyncDialog(self, self.pid_dir, parcel_num=p_id, rs_path=rs_file)
         return "break"
 
     def show_shortcuts_dialog(self):

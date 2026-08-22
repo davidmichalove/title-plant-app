@@ -6,20 +6,21 @@ from tkinter import ttk, messagebox
 from or_compiler_engine import ORCompilerEngine
 
 class ORSyncDialog(tk.Toplevel):
-    def __init__(self, master, pid_dir, parcel_num=None):
+    def __init__(self, master, pid_dir, parcel_num=None, rs_path=None):
         super().__init__(master)
         self.title("📊 Ownership Report (OR) Auto-Compiler & Sync")
-        self.geometry("820x680")
+        self.geometry("850x680")
         self.minsize(700, 500)
         self.transient(master)
         self.attributes("-topmost", True)
 
         self.pid_dir = pid_dir
         self.parcel_num = parcel_num
+        self.rs_path = rs_path
 
-        self.data = ORCompilerEngine.compile_data(self.pid_dir, self.parcel_num)
+        self.data = ORCompilerEngine.compile_data(self.pid_dir, self.parcel_num, rs_path=self.rs_path)
         if not self.data:
-            messagebox.showerror("Error", f"Could not find valid Runsheet data in:\n{pid_dir}", parent=self)
+            messagebox.showerror("Error", f"Could not extract runsheet rows from:\n{self.rs_path or self.pid_dir}", parent=self)
             self.destroy()
             return
 
