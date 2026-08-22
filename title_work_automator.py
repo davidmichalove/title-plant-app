@@ -166,6 +166,8 @@ class AutomatorApp:
         self.checklist_btn.pack(side=tk.LEFT, padx=5)
         self.status_btn = ttk.Button(btn_container_top, text="PID Status", command=self.open_status_tracker)
         self.status_btn.pack(side=tk.LEFT, padx=5)
+        self.open_or_btn = ttk.Button(btn_container_top, text="📊 Open OR Excel", command=self.open_ownership_report)
+        self.open_or_btn.pack(side=tk.LEFT, padx=5)
 
         btn_container_bottom = ttk.Frame(frame)
         btn_container_bottom.grid(row=2, column=0, columnspan=2, pady=(0, 10))
@@ -492,6 +494,12 @@ class AutomatorApp:
         
         self.parcel_entry.bind('<<ComboboxSelected>>', lambda e: self.on_parcel_change())
         self.parcel_entry.bind('<KeyRelease>', lambda e: self.on_parcel_change())
+        
+        # Shortcut to Open Ownership Report Excel (Command+O / Ctrl+O)
+        self.root.bind("<Command-o>", self.open_ownership_report)
+        self.root.bind("<Control-o>", self.open_ownership_report)
+        self.root.bind("<Command-O>", self.open_ownership_report)
+        self.root.bind("<Control-O>", self.open_ownership_report)
 
     def refresh_recent_parcels(self):
         import glob
@@ -4148,6 +4156,53 @@ end tell'''
             
         ttk.Button(dialog, text="Save to Notes", command=on_save).grid(row=4, column=0, columnspan=2, pady=15)
         
+    def open_ownership_report(self, event=None):
+        pid = self.parcel_entry.get().strip()
+        if not pid:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Please enter or select a Parcel Number (PID) first.")
+            return "break"
+
+        pid_dir = self.get_parcel_dir(pid)
+        if not os.path.exists(pid_dir):
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Parcel folder does not exist:\n{pid_dir}")
+            return "break"
+
+        import glob
+        matches = glob.glob(os.path.join(pid_dir, "*OR*.xlsx")) + glob.glob(os.path.join(pid_dir, "*Ownership*.xlsx"))
+        matches = [
+            m for m in matches 
+            if not os.path.basename(m).startswith("~$") 
+            and not os.path.basename(m).startswith("._") 
+            and "_Backup" not in m
+        ]
+
+        if not matches:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Could not find any Ownership Report (*OR*.xlsx) in:\n{pid_dir}")
+            return "break"
+
+        target_file = matches[0]
+        for m in matches:
+            b_name = os.path.basename(m).upper()
+            if "TEMPLATE" not in b_name and "BLANK" not in b_name:
+                target_file = m
+                break
+
+        try:
+            if os.name == 'nt':
+                os.startfile(target_file)
+            else:
+                import subprocess
+                subprocess.call(('open', target_file))
+            self.log(f"📊 Opened Ownership Report: {os.path.basename(target_file)}")
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Could not open Ownership Report Excel:\n{e}")
+
+        return "break"
+
     def open_gemini_rs_editor(self):
         pid = self.parcel_entry.get().strip()
         if not pid:
