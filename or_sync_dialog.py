@@ -1,6 +1,7 @@
 import os
 import glob
 import subprocess
+import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
 from or_compiler_engine import ORCompilerEngine
@@ -9,8 +10,8 @@ class ORSyncDialog(tk.Toplevel):
     def __init__(self, master, pid_dir, parcel_num=None, rs_path=None):
         super().__init__(master)
         self.title("📊 Ownership Report (OR) Auto-Compiler & Sync")
-        self.geometry("880x730")
-        self.minsize(720, 520)
+        self.geometry("880x750")
+        self.minsize(720, 540)
         self.transient(master)
         self.attributes("-topmost", True)
 
@@ -57,12 +58,12 @@ class ORSyncDialog(tk.Toplevel):
         tab_leases = ttk.Frame(self.notebook, padding=10)
         tab_mortgages = ttk.Frame(self.notebook, padding=10)
 
-        self.notebook.add(tab_owners, text="🏠 Owners & Cleanup")
+        self.notebook.add(tab_owners, text="🏠 Owners & Leasehold")
         self.notebook.add(tab_easements, text=f"🛣️ Easements ({len(self.data['easements'])})")
         self.notebook.add(tab_leases, text=f"🛢️ O&G Leases ({len(self.data['leases'])})")
         self.notebook.add(tab_mortgages, text=f"🏦 Mortgages ({len(self.data['mortgages'])})")
 
-        # --- TAB 1: OWNERS & CLEANUP OPTIONS ---
+        # --- TAB 1: OWNERS & LEASEHOLD OPTIONS ---
         so = self.data["surface_owner"]
         ttk.Label(tab_owners, text="Surface Owner (Vesting Grantee):", font=("Helvetica", 11, "bold")).grid(row=0, column=0, sticky="w", pady=2)
         self.so_name_var = tk.StringVar(value=so.get("name", ""))
@@ -81,29 +82,45 @@ class ORSyncDialog(tk.Toplevel):
         self.so_add2_var = tk.StringVar(value=addrs[1] if len(addrs) > 1 else "")
         ttk.Entry(tab_owners, textvariable=self.so_add2_var, font=("Helvetica", 11)).grid(row=3, column=1, sticky="ew", padx=(5, 0), pady=2)
 
+        # Default Year to (2026)
+        year_default = so.get("year", f"({datetime.date.today().year})") or f"({datetime.date.today().year})"
         ttk.Label(tab_owners, text="Acquired Year:", font=("Helvetica", 11, "bold")).grid(row=4, column=0, sticky="w", pady=2)
-        self.so_year_var = tk.StringVar(value=so.get("year", ""))
+        self.so_year_var = tk.StringVar(value=year_default)
         ttk.Entry(tab_owners, textvariable=self.so_year_var, font=("Helvetica", 11)).grid(row=4, column=1, sticky="w", padx=(5, 0), pady=2)
 
         tab_owners.columnconfigure(1, weight=1)
 
-        ttk.Separator(tab_owners, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Separator(tab_owners, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=8)
+
+        # Leasehold Option Frame
+        l_frame = ttk.LabelFrame(tab_owners, text="🛢️ Leasehold Schedule A Automation", padding=10)
+        l_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=3)
+
+        self.leasehold_mode_var = tk.StringVar(value=self.data.get("leasehold_mode", "open_of_record"))
+        p_lease = self.data.get("primary_lease")
+        
+        lease_desc = "Auto-Populate Leasehold Schedule A from active lease"
+        if p_lease:
+            lease_desc += f": {p_lease['bk_pg']} ({p_lease['lessee'][:30]}...)"
+            
+        rb1 = ttk.Radiobutton(l_frame, text=f"✅ {lease_desc}", value="populate", variable=self.leasehold_mode_var)
+        rb1.pack(anchor="w", pady=2)
+
+        rb2 = ttk.Radiobutton(l_frame, text="📜 OPEN OF RECORD (No active lease / Delete 'Leasehold Schedule A' tab)", value="open_of_record", variable=self.leasehold_mode_var)
+        rb2.pack(anchor="w", pady=2)
 
         # Quick Cleanup Options Section
-        opt_frame = ttk.LabelFrame(tab_owners, text="⚡ Quick Excel Cleanup & Formatting", padding=10)
-        opt_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
+        opt_frame = ttk.LabelFrame(tab_owners, text="⚡ Quick Cleanups", padding=10)
+        opt_frame.grid(row=7, column=0, columnspan=2, sticky="ew", pady=3)
 
         self.sync_mineral_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt_frame, text="✅ Mirror Mineral Ownership to match Surface Owner (100% Fee Simple)", variable=self.sync_mineral_var).pack(anchor="w", pady=3)
+        ttk.Checkbutton(opt_frame, text="✅ Mirror Mineral Ownership to match Surface Owner (100% Fee Simple)", variable=self.sync_mineral_var).pack(anchor="w", pady=2)
 
         self.sole_mineral_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt_frame, text="🗑️ Sole Mineral Holder Only: Delete 'Jim Doe' placeholder block (Rows 32–40) & set to 100%", variable=self.sole_mineral_var).pack(anchor="w", pady=3)
-
-        self.no_leasehold_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt_frame, text="🛢️ No Leasehold: Write 'OPEN OF RECORD' in Col J & Delete 'Leasehold Schedule A' tab", variable=self.no_leasehold_var).pack(anchor="w", pady=3)
+        ttk.Checkbutton(opt_frame, text="🗑️ Sole Mineral Holder: Delete 'Jim Doe' placeholder (Rows 32–40) & set to 100%", variable=self.sole_mineral_var).pack(anchor="w", pady=2)
 
         self.delete_notes_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt_frame, text="📝 Delete Notes Block: Delete Rows 42–46 (NOTE #1 / Add note text here)", variable=self.delete_notes_var).pack(anchor="w", pady=3)
+        ttk.Checkbutton(opt_frame, text="📝 Delete Notes Block: Delete Rows 42–46 (NOTE #1 / Add note text here)", variable=self.delete_notes_var).pack(anchor="w", pady=2)
 
         # --- TAB 2: EASEMENTS ---
         ttk.Label(tab_easements, text="Detected Easements to write as 'BookType Vol/Pg':", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
@@ -186,7 +203,7 @@ class ORSyncDialog(tk.Toplevel):
             self.data["mineral_owner"] = dict(self.data["surface_owner"])
 
         self.data["sole_mineral_owner"] = self.sole_mineral_var.get()
-        self.data["no_leasehold"] = self.no_leasehold_var.get()
+        self.data["leasehold_mode"] = self.leasehold_mode_var.get()
         self.data["delete_notes"] = self.delete_notes_var.get()
 
         for var, e in self.easement_vars:

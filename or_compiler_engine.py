@@ -165,6 +165,69 @@ def format_encumbrance_short(r):
     else:
         return str(r.get("itype", "Doc")).strip()
 
+def parse_lease_details(r):
+    comments = r.get("comments", "")
+    eff_dt_str = r.get("eff_dt", "")
+    
+    term_match = re.search(r"(\d+)\s*(?:yr|year|years)\s*(?:pt|primary\s*term)?", comments, re.IGNORECASE)
+    term_years = int(term_match.group(1)) if term_match else 5
+    
+    option_match = re.search(r"(?:option\s*(?:to\s*renew)?|renewal)[\s:]*(\d+)\s*(?:yr|year|years)", comments, re.IGNORECASE)
+    option_years = int(option_match.group(1)) if option_match else 0
+    
+    term_desc = f"{term_years}yr"
+    if option_years:
+        term_desc += f" + {option_years}yr Option"
+        
+    exp_date_str = "HBP"
+    if eff_dt_str:
+        try:
+            dt = datetime.datetime.strptime(eff_dt_str, "%m/%d/%Y")
+            total_years = term_years + option_years
+            exp_dt = dt.replace(year=dt.year + total_years)
+            exp_date_str = exp_dt.strftime("%m/%d/%Y")
+        except: pass
+        
+    royalty_match = re.search(r"royalty[\s:]*([0-9\./%]+|unknown|1/8th?)", comments, re.IGNORECASE)
+    royalty_str = royalty_match.group(1).strip() if royalty_match else "20%"
+    
+    pugh = "None"
+    pugh_m = re.search(r"pugh[\s:]*(.*?)(?:\n|$)", comments, re.IGNORECASE)
+    if pugh_m and "none" not in pugh_m.group(1).lower():
+        pugh = pugh_m.group(1).strip()
+        
+    depth = "None"
+    depth_m = re.search(r"depth[\s:]*(.*?)(?:\n|$)", comments, re.IGNORECASE)
+    if depth_m and "none" not in depth_m.group(1).lower():
+        depth = depth_m.group(1).strip()
+        
+    pooling = "Right to Unitize, 640 Pooling, ETC"
+    pool_m = re.search(r"pooling[\s:]*(.*?)(?:\n|$)", comments, re.IGNORECASE)
+    if pool_m:
+        pooling = pool_m.group(1).strip()
+        
+    btype = r.get("btype", "")
+    vol = r.get("vol", "")
+    pg = r.get("pg", "")
+    bk_pg = f"{btype} {vol}/{pg}"
+    is_memo = "memo" in r.get("itype", "").lower() or "memo" in comments.lower()
+    
+    return {
+        "row": r,
+        "lessor": r.get("grantor", ""),
+        "lessee": r.get("grantee", ""),
+        "bk_pg": bk_pg,
+        "inst_num": r.get("inst_num", ""),
+        "is_memo": is_memo,
+        "eff_date": eff_dt_str,
+        "term": term_desc,
+        "exp_date": exp_date_str,
+        "royalty": royalty_str,
+        "pugh": pugh,
+        "depth": depth,
+        "pooling": pooling
+    }
+
 class ORCompilerEngine:
     @classmethod
     def compile_data(cls, pid_dir, parcel_num=None, rs_path=None):
@@ -289,15 +352,11 @@ class ORCompilerEngine:
         
         surface_owner_name = ""
         surface_tenancy = ""
-        acquired_year = ""
+        # Default Acquired Year to (2026) / current year
+        acquired_year = f"({datetime.date.today().year})"
         
         if vesting_row:
             raw_grantee = vesting_row["grantee"]
-            if vesting_row["eff_dt"]:
-                try:
-                    acquired_year = f"({vesting_row['eff_dt'].split('/')[-1]})"
-                except: pass
-                
             m_ten = re.search(r',\s*(husband and wife.*|for their joint lives.*|as survivorship tenants.*|a single person.*|unmarried.*|widow.*|a corporation.*|an ohio.*|a delaware.*)', raw_grantee, re.IGNORECASE)
             if m_ten:
                 surface_tenancy = m_ten.group(1).strip().upper()
@@ -325,17 +384,13 @@ class ORCompilerEngine:
                 
         # B) Oil & Gas Leases
         lease_rows = []
-        releases = []
-        for r in rows:
-            it_l = r["itype"].lower()
-            if any(k in it_l for k in ["release of lease", "surrender of lease", "cancellation of lease"]):
-                releases.append(r)
-                
+        parsed_leases = []
         for r in rows:
             it_l = r["itype"].lower()
             if any(k in it_l for k in ["lease", "memorandum of lease", "oil and gas lease", "ratification of oil", "addendum to and ratification"]) and not any(k in it_l for k in ["release", "surrender", "assignment"]):
                 summary = format_encumbrance_short(r)
                 lease_rows.append({"row": r, "summary": summary, "included": True, "status": "Active"})
+                parsed_leases.append(parse_lease_details(r))
                 
         # C) Mortgages
         mortgage_rows = []
@@ -368,6 +423,10 @@ class ORCompilerEngine:
                     "status": "Satisfied" if is_satisfied else "Unreleased"
                 })
                 
+        # Primary Lease for Schedule A (prioritizing base lease / memo over ratifications)
+        base_leases = [l for l in parsed_leases if not any(k in l["row"]["itype"].lower() for k in ["amendment", "ratification", "addendum", "assignment"])]
+        primary_lease = base_leases[-1] if base_leases else (parsed_leases[-1] if parsed_leases else None)
+        
         return {
             "pid_dir": pid_dir,
             "rs_path": rs_path,
@@ -392,9 +451,11 @@ class ORCompilerEngine:
             },
             "easements": easement_rows,
             "leases": lease_rows,
+            "parsed_leases": parsed_leases,
+            "primary_lease": primary_lease,
             "mortgages": mortgage_rows,
             "sole_mineral_owner": True,
-            "no_leasehold": True,
+            "leasehold_mode": "populate" if primary_lease else "open_of_record",
             "delete_notes": True
         }
 
@@ -501,13 +562,55 @@ class ORCompilerEngine:
                     ws.cell(r, c).value = None
             ws.cell(23, 3).value = 1.0
 
-        # 7. No Leasehold -> Set J23 to OPEN OF RECORD & delete Leasehold Schedule tab
-        if data.get("no_leasehold", True):
+        # 7. Leasehold Handling (Populate vs Open of Record)
+        l_mode = data.get("leasehold_mode", "open_of_record")
+        p_lease = data.get("primary_lease")
+        
+        if l_mode == "open_of_record" or not p_lease:
             ws.cell(23, 10, "OPEN OF RECORD")
             for r in range(24, 32):
                 ws.cell(r, 10).value = None
             if "Leasehold Schedule A" in wb.sheetnames:
                 wb.remove(wb["Leasehold Schedule A"])
+        else:
+            # Auto-populate Leasehold Column J in TR #1 Ownership
+            memo_tag = " (Memo)" if p_lease.get("is_memo") else ""
+            ws.cell(23, 10, "LEASEHOLD SCHEDULE A")
+            ws.cell(24, 10, f"Exp.: {p_lease['exp_date']}, {p_lease['term']}, HBP")
+            ws.cell(25, 10, f"Royalty: {p_lease['royalty']}")
+            ws.cell(26, 10, f"Book/Page: {p_lease['bk_pg']}{memo_tag}")
+            ws.cell(27, 10, f"Instrument Number: {p_lease['inst_num']}")
+            ws.cell(28, 10, "Covers Tract #1 Only")
+            ws.cell(29, 10, f"Horizontal Pugh Clause: {p_lease['pugh']}")
+            ws.cell(30, 10, f"Depth Clause: {p_lease['depth']}")
+            ws.cell(31, 10, f"Pooling Clause: {p_lease['pooling']}")
+            
+            # Auto-populate Leasehold Schedule A tab if present
+            if "Leasehold Schedule A" in wb.sheetnames:
+                ws_ls = wb["Leasehold Schedule A"]
+                ws_ls.cell(11, 1, f"{p_lease['bk_pg']}\n{p_lease['inst_num']}\n(Memo)" if p_lease.get("is_memo") else f"{p_lease['bk_pg']}\n{p_lease['inst_num']}")
+                ws_ls.cell(11, 2, p_lease["lessor"])
+                ws_ls.cell(11, 3, p_lease["lessee"])
+                ws_ls.cell(11, 4, "='TR #1 Ownership'!E23")
+                
+                # Royalty decimal conversion
+                r_num = 0.20
+                try:
+                    r_clean = p_lease["royalty"].replace("%", "").strip()
+                    if "/" in r_clean:
+                        n, d = r_clean.split("/")
+                        r_num = float(n) / float(d)
+                    else:
+                        r_num = float(r_clean) / 100.0 if float(r_clean) > 1 else float(r_clean)
+                except: pass
+                ws_ls.cell(11, 6, r_num)
+                ws_ls.cell(11, 8, p_lease["eff_date"])
+                ws_ls.cell(11, 9, p_lease["term"])
+                ws_ls.cell(11, 10, 1)
+                ws_ls.cell(11, 11, p_lease["exp_date"])
+                ws_ls.cell(19, 1, p_lease["lessee"])
+                ws_ls.cell(8, 1, f"DATED: {datetime.date.today().strftime('%m/%d/%Y')}")
+                ws_ls.cell(8, 11, "PREPARED BY: DAVID MICHALOVE")
             
         # 8. Delete Notes Block (Rows 42 to 46)
         if data.get("delete_notes", True):
