@@ -184,6 +184,8 @@ class AutomatorApp:
         self.gis_browser_btn.pack(side=tk.LEFT, padx=3)
         self.name_search_btn = ttk.Button(btn_container_bottom, text="Nom Search", command=self.open_name_search)
         self.name_search_btn.pack(side=tk.LEFT, padx=3)
+        self.shortcuts_btn = ttk.Button(btn_container_bottom, text="Shrtcs", command=self.show_shortcuts_dialog)
+        self.shortcuts_btn.pack(side=tk.LEFT, padx=3)
 
         self.notebook = ttk.Notebook(frame)
         self.notebook.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=5)
@@ -4194,6 +4196,77 @@ end tell'''
         
         import plat_cabinet_searcher
         plat_cabinet_searcher.PlatCabinetSearchWindow(self.root, parcel_dir=pid_dir)
+
+    def show_shortcuts_dialog(self):
+        popup = tk.Toplevel(self.root)
+        popup.title("Keyboard Shortcuts Cheat Sheet")
+        popup.geometry("640x520")
+        popup.attributes("-topmost", True)
+        popup.transient(self.root)
+
+        try:
+            x = self.root.winfo_rootx() + (self.root.winfo_width() // 2) - 320
+            y = self.root.winfo_rooty() + (self.root.winfo_height() // 2) - 260
+            popup.geometry(f"+{x}+{y}")
+        except Exception: pass
+
+        main_frame = ttk.Frame(popup, padding=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="⌨️ Title Work Shortcuts Cheat Sheet", font=("Helvetica", 16, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("shortcut", "area", "description")
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=15)
+        tree.heading("shortcut", text="Shortcut Key")
+        tree.heading("area", text="Area")
+        tree.heading("description", text="Action / Description")
+
+        tree.column("shortcut", width=180, anchor=tk.W)
+        tree.column("area", width=100, anchor=tk.W)
+        tree.column("description", width=320, anchor=tk.W)
+
+        shortcuts = [
+            # Main Portal
+            ("Cmd + O / Ctrl + O", "Main Portal", "Open active parcel's Ownership Report (*OR*.xlsx)"),
+            ("Cmd + G / Ctrl + G", "Main Portal", "Open Belmont GIS zoomed to active parcel"),
+            ("Cmd + R / Ctrl + R", "Main Portal", "Open Belmont Recorder website (Kofile)"),
+            
+            # Editor
+            ("Cmd + S / Ctrl + S", "RS Editor", "Save current row & Excel workbook"),
+            ("Cmd + G / Ctrl + G", "Gemini Editor", "✨ Draft active row with Gemini AI"),
+            ("Cmd + A / Ctrl + A", "RS / Gemini", "View Gemini Source Provenance, Quotes, & Warnings"),
+            ("Cmd+Shift+D / Opt+D", "RS / Gemini", "Strip '--- Gemini Draft ---' / '--- Original ---' blocks"),
+            ("Cmd + P / Ctrl + P", "RS Editor", "Set row status to 'In Progress'"),
+            ("Cmd + F / Ctrl + F", "RS Editor", "Set row status to 'Completed'"),
+            ("Cmd + D / Ctrl + D", "RS Editor", "Toggle 'Dower Reviewed' checkbox"),
+            ("Cmd + O / Ctrl + O", "RS Editor", "Open PDF Document for current row"),
+            ("Cmd + N / Ctrl + N", "RS Editor", "Convert selection or field to Title Case"),
+            ("Cmd + L / Ctrl + L", "RS Editor", "Open Phrase Library window"),
+            ("Ctrl + 1 .. 9, 0", "RS Editor", "Insert Phrase #1 through #10 at cursor"),
+            ("Ctrl + ↑ / ↓ (Alt + ↑/↓)", "RS Editor", "Save & jump to Previous / Next Row"),
+            ("Click 🔍 Blue Label", "RS Editor", "Auto-apply AI suggested field value"),
+            ("Left-Click Link", "RS Editor", "Jump to referenced runsheet row"),
+            ("Right-Click Link", "RS Editor", "Open referenced PDF Document")
+        ]
+
+        for sc, area, desc in shortcuts:
+            tree.insert("", tk.END, values=(sc, area, desc))
+
+        vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_close = ttk.Button(main_frame, text="Close (Esc)", command=popup.destroy)
+        btn_close.pack(pady=(10, 0), anchor=tk.E)
+        btn_close.focus_set()
+
+        popup.bind("<Escape>", lambda e: popup.destroy())
+        popup.bind("<Return>", lambda e: popup.destroy())
 
     def open_belmont_recorder(self, event=None):
         recorder_url = "https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH"
