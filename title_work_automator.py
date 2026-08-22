@@ -193,6 +193,12 @@ class AutomatorApp:
         self.notebook.add(tab_tools, text="Tools")
         
         # --- TOOLS TAB CONTENT ---
+        combiner_frame = ttk.Frame(tab_tools)
+        combiner_frame.grid(row=97, column=0, columnspan=2, pady=(15, 5), sticky="w", padx=10)
+        ttk.Label(combiner_frame, text="PDF Combiner Utility:", font=("Helvetica", 12, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(combiner_frame, text="Merge multiple PDFs into a single file with drag & drop, custom ordering, and auto-naming.", wraplength=450).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Button(combiner_frame, text="📑 Open PDF Combiner", command=self.open_pdf_combiner).pack(anchor=tk.W)
+
         plat_frame = ttk.Frame(tab_tools)
         plat_frame.grid(row=98, column=0, columnspan=2, pady=(15, 5), sticky="w", padx=10)
         
@@ -4168,6 +4174,13 @@ end tell'''
             
         ttk.Button(dialog, text="Save to Notes", command=on_save).grid(row=4, column=0, columnspan=2, pady=15)
         
+    def open_pdf_combiner(self):
+        pid = self.parcel_entry.get().strip()
+        pid_dir = self.get_parcel_dir(pid) if pid and os.path.exists(self.get_parcel_dir(pid)) else None
+        
+        import pdf_combiner
+        pdf_combiner.PDFCombinerWindow(self.root, parcel_dir=pid_dir)
+
     def open_plat_cabinet_searcher(self):
         pid = self.parcel_entry.get().strip()
         pid_dir = self.get_parcel_dir(pid) if pid and os.path.exists(self.get_parcel_dir(pid)) else None
