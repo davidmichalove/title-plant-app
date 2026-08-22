@@ -27,7 +27,6 @@ def parse_date(date_val):
     s = str(date_val).strip()
     s = re.sub(r'^(DOD|Dated|Effective|Filed|Recorded)\s*', '', s, flags=re.IGNORECASE).strip()
     
-    # Try formats
     for fmt in ["%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%y"]:
         try:
             dt = datetime.datetime.strptime(s, fmt)
@@ -47,6 +46,53 @@ def parse_date(date_val):
             return dt.strftime("%m/%d/%Y")
         except: pass
     return None
+
+def calculate_quarter_section(parcel_num):
+    norm_p = normalize_parcel_num(parcel_num)
+    try:
+        shp_path = os.path.join(BASE_APP_DIR, "shape_files", "Belmont_County_Parcels.shp")
+        plss_shp = "/Volumes/davidlls/various_GIS_shapefiles/OH-CADNSDI-v2_SPSNAD83/PLSSFirstDivision.shp"
+        if os.path.exists(shp_path):
+            import geopandas as gpd
+            from shapely.geometry import box
+            parcels_gdf = gpd.read_file(shp_path)
+            p_matches = parcels_gdf[parcels_gdf["parcel_no"] == norm_p]
+            if len(p_matches) == 0:
+                p_matches = parcels_gdf[parcels_gdf["parcel_no"].str.contains(norm_p.replace("-",""), na=False)]
+                
+            if len(p_matches) > 0:
+                p_row = p_matches.iloc[0]
+                # 1. Check desc_
+                desc_str = str(p_row.get("desc_", "") or "")
+                m_q = re.search(r'\b(NW|NE|SW|SE)\b', desc_str, re.IGNORECASE)
+                if m_q:
+                    return f"{m_q.group(1).upper()}4"
+                    
+                # 2. Geometric calculation
+                p_geom = p_row.geometry
+                if p_geom is not None and os.path.exists(plss_shp):
+                    plss_gdf = gpd.read_file(plss_shp)
+                    m_secs = plss_gdf[plss_gdf.intersects(p_geom)]
+                    for _, sec_row in m_secs.iterrows():
+                        minx, miny, maxx, maxy = sec_row.geometry.bounds
+                        midx = (minx + maxx) / 2.0
+                        midy = (miny + maxy) / 2.0
+                        q_boxes = {
+                            "NW": box(minx, midy, midx, maxy),
+                            "NE": box(midx, midy, maxx, maxy),
+                            "SW": box(minx, miny, midx, midy),
+                            "SE": box(midx, miny, maxx, midy),
+                        }
+                        overlaps = {}
+                        for q_code, q_box in q_boxes.items():
+                            if p_geom.intersects(q_box):
+                                overlaps[q_code] = p_geom.intersection(q_box).area
+                        if overlaps:
+                            best_q = max(overlaps, key=overlaps.get)
+                            return f"{best_q}4"
+    except Exception as e:
+        print(f"Quarter calculation error: {e}")
+    return "SE4"
 
 def get_gis_owner_info(parcel_num):
     if not parcel_num or not os.path.exists(SHAPE_FILE_DBF):
@@ -107,6 +153,18 @@ def get_gis_owner_info(parcel_num):
         print(f"GIS lookup error: {e}")
     return {}
 
+def format_encumbrance_short(r):
+    itype = r["itype"]
+    btype = r["btype"]
+    vol = r["vol"]
+    pg = r["pg"]
+    if vol and pg and vol.lower() != "na" and pg.lower() != "na":
+        return f"{itype}, {btype} {vol}/{pg}"
+    elif vol and vol.lower() != "na":
+        return f"{itype}, {btype} {vol}"
+    else:
+        return f"{itype}"
+
 class ORCompilerEngine:
     @classmethod
     def compile_data(cls, pid_dir, parcel_num=None, rs_path=None):
@@ -148,7 +206,7 @@ class ORCompilerEngine:
                     elif "comment" in val or "note" in val: col_map["comments"] = c
                 break
                 
-        # Default fallbacks if header not found
+        # Default fallbacks
         if "itype" not in col_map: col_map["itype"] = 1
         if "btype" not in col_map: col_map["btype"] = 2
         if "vol" not in col_map: col_map["vol"] = 3
@@ -174,7 +232,6 @@ class ORCompilerEngine:
             grantee = str(ws.cell(r, col_map["grantee"]).value or '').strip()
             comments = str(ws.cell(r, col_map["comments"]).value or '').strip()
             
-            # Treat "None" string as empty
             if itype.lower() == "none": itype = ""
             if btype.lower() == "none": btype = ""
             if vol.lower() == "none": vol = ""
@@ -241,7 +298,6 @@ class ORCompilerEngine:
                     acquired_year = f"({vesting_row['eff_dt'].split('/')[-1]})"
                 except: pass
                 
-            # Parse Tenancy
             m_ten = re.search(r',\s*(husband and wife.*|for their joint lives.*|as survivorship tenants.*|a single person.*|unmarried.*|widow.*|a corporation.*|an ohio.*|a delaware.*)', raw_grantee, re.IGNORECASE)
             if m_ten:
                 surface_tenancy = m_ten.group(1).strip().upper()
@@ -255,13 +311,16 @@ class ORCompilerEngine:
         if not address_lines:
             address_lines = ["Belmont County, OH"]
             
-        # 5. Encumbrances Scanning
+        # 5. Quarter Section Calculation
+        qtr_val = calculate_quarter_section(parcel_num)
+        
+        # 6. Encumbrances Scanning (Clean Short Format: "Instrument Type, BookType Vol/Pg")
         # A) Easements
         easement_rows = []
         for r in rows:
             it_l = r["itype"].lower()
             if any(k in it_l for k in ["right of way", "easement", "pipeline", "powerline", "electric", "highway", "utility", "telephone", "roadway"]):
-                summary = f"{r['grantor']} to {r['grantee']}, dated {r['eff_dt'] or 'NA'}, filed {r['file_dt'] or 'NA'}, {r['btype']} Vol {r['vol']}, Pg {r['pg']}"
+                summary = format_encumbrance_short(r)
                 easement_rows.append({"row": r, "summary": summary, "included": True})
                 
         # B) Oil & Gas Leases
@@ -275,7 +334,7 @@ class ORCompilerEngine:
         for r in rows:
             it_l = r["itype"].lower()
             if any(k in it_l for k in ["lease", "memorandum of lease", "oil and gas lease", "ratification of oil", "addendum to and ratification"]) and not any(k in it_l for k in ["release", "surrender", "assignment"]):
-                summary = f"{r['grantor']} to {r['grantee']}, dated {r['eff_dt'] or 'NA'}, filed {r['file_dt'] or 'NA'}, {r['btype']} Vol {r['vol']}, Pg {r['pg']}"
+                summary = format_encumbrance_short(r)
                 lease_rows.append({"row": r, "summary": summary, "included": True, "status": "Active"})
                 
         # C) Mortgages
@@ -300,7 +359,7 @@ class ORCompilerEngine:
                         if b_m:
                             is_satisfied = True
                             
-                summary = f"{r['grantor']} to {r['grantee']}, dated {r['eff_dt'] or 'NA'}, filed {r['file_dt'] or 'NA'}, {r['btype']} Vol {r['vol']}, Pg {r['pg']}"
+                summary = format_encumbrance_short(r)
                 mortgage_rows.append({
                     "row": r,
                     "summary": summary,
@@ -315,6 +374,8 @@ class ORCompilerEngine:
             "parcel_num": parcel_num,
             "from_date": earliest_date,
             "to_date": today_date,
+            "qtr_val": qtr_val,
+            "vesting_deed": vesting_row,
             "surface_owner": {
                 "name": surface_owner_name,
                 "tenancy": surface_tenancy,
@@ -342,7 +403,58 @@ class ORCompilerEngine:
         wb = openpyxl.load_workbook(or_path)
         ws = wb.active
         
-        # 1. Date Range in cell B62 (or finding "RECORDS EXAMINED FROM AND TO:")
+        # 1. Update Cell B3 (Caption Paragraph with QTR & Vesting Deed Info)
+        b3_val = ws["B3"].value
+        if b3_val and isinstance(b3_val, str):
+            vd = data.get("vesting_deed")
+            qtr = data.get("qtr_val", "SE4")
+            
+            # Map book types to full records name
+            btype_full = "Deed Records"
+            if vd:
+                bt = str(vd.get("btype", "")).upper()
+                if "OR" in bt or "OFFICIAL" in bt: btype_full = "Official Records"
+                elif "MR" in bt or "MORTGAGE" in bt: btype_full = "Mortgage Records"
+                else: btype_full = "Deed Records"
+                
+            repl_map = {
+                "QUARTER CALL": qtr,
+                "<QTR>": qtr,
+                "<QUARTER>": qtr,
+                "<QTR_CALL>": qtr,
+            }
+            
+            if vd:
+                v_itype = str(vd.get("itype", "Deed")).strip()
+                v_grantor = str(vd.get("grantor", "")).strip()
+                v_grantee = str(vd.get("grantee", "")).strip()
+                v_eff_dt = str(vd.get("eff_dt") or vd.get("eff_dt_raw") or "XX/XX/XXXX").strip()
+                v_vol = str(vd.get("vol", "XX")).strip()
+                v_pg = str(vd.get("pg", "XX")).strip()
+                
+                repl_map.update({
+                    "Instrument Type": v_itype,
+                    "<INST_TYPE>": v_itype,
+                    "from Grantor to Grantee": f"from {v_grantor} to {v_grantee}",
+                    "<GRANTOR>": v_grantor,
+                    "<GRANTEE>": v_grantee,
+                    "effective date XX/XX/XXXX": f"effective date {v_eff_dt}",
+                    "<EFF_DATE>": v_eff_dt,
+                    "Volume XX": f"Volume {v_vol}",
+                    "<VOL>": v_vol,
+                    "Page XX": f"Page {v_pg}",
+                    "<PG>": v_pg,
+                    "Record Type Records": btype_full,
+                    "Record Type": btype_full.replace(" Records", ""),
+                    "<REC_TYPE>": btype_full
+                })
+                
+            new_b3 = b3_val
+            for old_k, new_v in repl_map.items():
+                new_b3 = new_b3.replace(old_k, new_v)
+            ws["B3"] = new_b3
+
+        # 2. Date Range in cell B62 (or finding "RECORDS EXAMINED FROM AND TO:")
         date_str = f"{data['from_date']} TO {data['to_date']}"
         date_cell_found = False
         for r in range(50, ws.max_row + 1):
@@ -358,7 +470,18 @@ class ORCompilerEngine:
         if not date_cell_found:
             ws.cell(62, 2, date_str)
             
-        # 2. Surface Owner (Rows 15-19)
+        # 3. Prepared By (Row 61: AGENT NAME -> DAVID MICHALOVE)
+        for r in range(50, ws.max_row + 1):
+            for c in range(1, 4):
+                val_str = str(ws.cell(r, c).value or '')
+                if "PREPARED BY" in val_str:
+                    target_c = c + 1 if c + 1 <= ws.max_column else 2
+                    curr_agent = str(ws.cell(r, target_c).value or '')
+                    if not curr_agent or "AGENT" in curr_agent.upper() or "<AGENT" in curr_agent.upper():
+                        ws.cell(r, target_c, "DAVID MICHALOVE")
+                    break
+
+        # 4. Surface Owner (Rows 15-19)
         so = data.get("surface_owner", {})
         if so.get("name"):
             ws.cell(15, 1, so["name"])
@@ -370,7 +493,7 @@ class ORCompilerEngine:
             if so.get("year"): ws.cell(19, 1, so["year"])
             ws.cell(15, 3, so.get("interest", 1))
             
-        # 3. Mineral Owner (Rows 23-27)
+        # 5. Mineral Owner (Rows 23-27)
         mo = data.get("mineral_owner", {})
         if mo.get("name"):
             ws.cell(23, 1, mo["name"])
@@ -382,7 +505,7 @@ class ORCompilerEngine:
             if mo.get("year"): ws.cell(27, 1, mo["year"])
             ws.cell(23, 3, mo.get("interest", 1))
             
-        # 4. Easements (Row 52)
+        # 6. Easements (Row 52)
         inc_easements = [e["summary"] for e in data.get("easements", []) if e.get("included")]
         for r in range(45, 60):
             if ws.cell(r, 1).value and "EASEMENTS & RIGHTS OF WAY" in str(ws.cell(r, 1).value):
@@ -393,7 +516,7 @@ class ORCompilerEngine:
                     ws.cell(r + 1, 1, "1) None")
                 break
                 
-        # 5. Oil & Gas Leases (Row 55)
+        # 7. Oil & Gas Leases (Row 55)
         inc_leases = [l["summary"] for l in data.get("leases", []) if l.get("included")]
         for r in range(48, 60):
             if ws.cell(r, 1).value and "UNRELEASED OIL & GAS LEASES" in str(ws.cell(r, 1).value):
@@ -404,7 +527,7 @@ class ORCompilerEngine:
                     ws.cell(r + 1, 1, "1) None")
                 break
                 
-        # 6. Unreleased Mortgages (Row 58)
+        # 8. Unreleased Mortgages (Row 58)
         inc_mortgages = [m["summary"] for m in data.get("mortgages", []) if m.get("included")]
         for r in range(50, 62):
             if ws.cell(r, 1).value and "UNRELEASED MORTGAGES" in str(ws.cell(r, 1).value):

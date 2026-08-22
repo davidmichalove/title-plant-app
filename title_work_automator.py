@@ -2762,6 +2762,11 @@ class AutomatorApp:
                 replacements = {
                     "XX-XXXXXXX.XXX": parcel_num,
                     "0.000000": acreage_val,
+                    "QUARTER CALL": str(qtr_val or "SE4"),
+                    "<QTR>": str(qtr_val or "SE4"),
+                    "<QUARTER>": str(qtr_val or "SE4"),
+                    "AGENT NAME": "DAVID MICHALOVE",
+                    "<AGENT>": "DAVID MICHALOVE",
                     "Section XX": f"Section {sec_val}",
                     "SECTION 10": f"SECTION {sec_val}",
                     "Township XN": f"Township {t}N",
