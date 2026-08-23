@@ -262,7 +262,7 @@ class SubmissionEmailDialog(tk.Toplevel):
         ttk.Entry(top_grid, textvariable=self.acres_var, width=28, font=("Helvetica", 10)).grid(row=3, column=1, sticky="w", padx=(5, 15), pady=3)
 
         ttk.Label(top_grid, text="Days / Hours Billed:", font=("Helvetica", 10, "bold")).grid(row=3, column=2, sticky="w", pady=3)
-        self.billed_var = tk.StringVar(value="6 hrs")
+        self.billed_var = tk.StringVar(value="")
         b_frame = ttk.Frame(top_grid)
         b_frame.grid(row=3, column=3, sticky="w", padx=(5, 0), pady=3)
         ttk.Entry(b_frame, textvariable=self.billed_var, width=9, font=("Helvetica", 10)).pack(side=tk.LEFT)
