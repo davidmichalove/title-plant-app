@@ -13,32 +13,44 @@ class SubmissionEmailDialog(tk.Toplevel):
     def __init__(self, master, pid_dir, parcel_num=None):
         super().__init__(master)
         self.title("✉️ Completion & Submission Email Generator")
-        self.geometry("860x780")
+        self.geometry("860x790")
         self.minsize(740, 580)
         self.transient(master)
         self.attributes("-topmost", True)
 
-        self.pid_dir = pid_dir
+        self.raw_pid_dir = pid_dir
         self.parcel_num = parcel_num or self._extract_parcel_num()
+        self.pid_dir, self.project_name = self._resolve_active_pid_dir(self.raw_pid_dir, self.parcel_num)
 
         self._load_parcel_data()
         self._build_ui()
         self.update_preview()
 
     def _extract_parcel_num(self):
-        if not self.pid_dir: return "42-00000.000"
-        m = re.search(r'PID\s*([0-9\-\.]+)', os.path.basename(self.pid_dir), re.IGNORECASE)
+        if not self.raw_pid_dir: return "42-00000.000"
+        m = re.search(r'PID\s*([0-9\-\.]+)', os.path.basename(self.raw_pid_dir), re.IGNORECASE)
         return m.group(1).strip() if m else "42-00000.000"
 
-    def _load_parcel_data(self):
-        # 1. Project Name from folder
-        self.project_name = "Norma North I, II"
-        if self.pid_dir:
-            m_proj = re.search(r'\((.*?)\)', os.path.basename(self.pid_dir))
-            if m_proj:
-                self.project_name = m_proj.group(1).strip()
+    def _resolve_active_pid_dir(self, base_dir, parcel_num):
+        if not base_dir or not os.path.exists(base_dir):
+            return base_dir, "Norma North I, II"
+            
+        # Check if there is an inner PID folder with project name in parens: PID 42-00125.000 (Norma North I, II)
+        sub_folders = [d for d in glob.glob(os.path.join(base_dir, "*")) if os.path.isdir(d)]
+        inner_pids = [d for d in sub_folders if "PID" in os.path.basename(d) and "(" in os.path.basename(d)]
+        
+        if inner_pids:
+            inner = inner_pids[0]
+            m = re.search(r'\((.*?)\)', os.path.basename(inner))
+            proj = m.group(1).strip() if m else "Norma North I, II"
+            return inner, proj
+        else:
+            m = re.search(r'\((.*?)\)', os.path.basename(base_dir))
+            proj = m.group(1).strip() if m else "Norma North I, II"
+            return base_dir, proj
 
-        # 2. Location & Acreage defaults
+    def _load_parcel_data(self):
+        # 1. Location & Acreage defaults
         self.twp = "Warren"
         self.t_num = "8N"
         self.r_num = "6W"
@@ -57,7 +69,6 @@ class SubmissionEmailDialog(tk.Toplevel):
             gis_info = or_compiler_engine.get_gis_owner_info(self.parcel_num)
             raw = gis_info.get("raw", {})
             if raw:
-                # Township / Sec / T / R
                 raw_twp = raw.get("twp", "")
                 if raw_twp.upper() == "WAR": self.twp = "Warren"
                 elif raw_twp.upper() == "MEA": self.twp = "Mead"
@@ -95,41 +106,76 @@ class SubmissionEmailDialog(tk.Toplevel):
                     if desc:
                         self.subdivision_lot_text = desc.title()
 
-                # Acreage
+                # Acreage from GIS
                 ac = raw.get("acres", "") or raw.get("calcacres", "")
                 if ac and ac != "0" and ac != "0.00000000":
                     try:
                         self.acreage = f"{float(ac):.6f}"
                     except: pass
 
-            # Try reading exact acreage from OR sheet
-            if self.pid_dir:
-                or_files = glob.glob(os.path.join(self.pid_dir, "*OR*.xlsx"))
-                valid_or = [f for f in or_files if not os.path.basename(f).startswith("~") and not os.path.basename(f).startswith("._") and "backup" not in f.lower()]
-                if valid_or:
-                    wb = openpyxl.load_workbook(valid_or[0], data_only=True)
-                    ws = wb.active
-                    or_ac = ws["B7"].value
-                    if or_ac and str(or_ac).strip() not in ["0.0", "0", "<ACRES_IN2>"]:
-                        self.acreage = str(or_ac).strip()
+            # Try reading exact acreage from OR sheet in active directory
+            search_dirs = [self.pid_dir, self.raw_pid_dir]
+            for s_dir in search_dirs:
+                if s_dir and os.path.exists(s_dir):
+                    or_files = glob.glob(os.path.join(s_dir, "*OR*.xlsx"))
+                    valid_or = [f for f in or_files if not os.path.basename(f).startswith("~") and not os.path.basename(f).startswith("._") and "backup" not in f.lower()]
+                    if valid_or:
+                        wb = openpyxl.load_workbook(valid_or[0], data_only=True)
+                        ws = wb.active
+                        or_ac = ws["B7"].value
+                        if or_ac and str(or_ac).strip() not in ["0.0", "0", "<ACRES_IN2>"]:
+                            self.acreage = str(or_ac).strip()
+                            break
 
-            # Run compiler engine for leases & encumbrances
+            # Compile encumbrances dynamically from the Runsheet (leases, easements, unreleased mortgages)
             data = or_compiler_engine.ORCompilerEngine.compile_data(self.pid_dir, self.parcel_num)
+            if not data and self.raw_pid_dir != self.pid_dir:
+                data = or_compiler_engine.ORCompilerEngine.compile_data(self.raw_pid_dir, self.parcel_num)
+
             if data:
-                p_l = data.get("primary_lease")
-                if p_l:
-                    is_notice = "notice" in p_l["row"].get("itype", "").lower() or "notice" in p_l["row"].get("comments", "").lower()
-                    type_str = "Oil and Gas Lease via Notice" if is_notice else "Oil and Gas Lease"
-                    memo_str = f" ({p_l['bk_pg']})"
-                    exp_str = f" expires {p_l['exp_date']}" if p_l.get("exp_date") else ""
-                    term_str = f" Includes a {p_l['term']}." if p_l.get("term") else ""
-                    self.encumbrance_text = f"- {type_str}{memo_str}{exp_str} (no release found of record).{term_str}"
-                elif data.get("leases"):
-                    lines = []
+                enc_lines = []
+                # 1. Active Leases
+                if data.get("leases"):
                     for l in data["leases"]:
                         r = l["row"]
-                        lines.append(f"- Oil and Gas Lease ({r['btype']} {r['vol']}/{r['pg']}) (no release found of record).")
-                    self.encumbrance_text = "\n".join(lines)
+                        p_l = or_compiler_engine.parse_lease_details(r)
+                        is_notice = "notice" in r.get("itype", "").lower() or "notice" in r.get("comments", "").lower()
+                        type_str = "Oil and Gas Lease via Notice" if is_notice else r["itype"]
+                        btype = r["btype"]
+                        vol = r["vol"]
+                        pg = r["pg"]
+                        bk_pg = f"({btype} {vol}/{pg})"
+                        exp_str = f" expires {p_l['exp_date']}" if p_l.get("exp_date") and p_l["exp_date"] != "HBP" else ""
+                        opt_str = ""
+                        if "option" in r.get("comments", "").lower():
+                            opt_str = " Includes a 5 year option to renew."
+                        enc_lines.append(f"- {type_str} {bk_pg}{exp_str} (no release found of record).{opt_str}")
+
+                # 2. Easements
+                if data.get("easements"):
+                    for e in data["easements"]:
+                        r = e["row"]
+                        itype = r["itype"]
+                        btype = r["btype"]
+                        vol = r["vol"]
+                        pg = r["pg"]
+                        enc_lines.append(f"- {itype} ({btype} {vol}/{pg}).")
+
+                # 3. Unreleased Mortgages
+                if data.get("mortgages"):
+                    unreleased_m = [m for m in data["mortgages"] if not m["is_satisfied"]]
+                    for m in unreleased_m:
+                        r = m["row"]
+                        btype = r["btype"]
+                        vol = r["vol"]
+                        pg = r["pg"]
+                        grantee = r["grantee"]
+                        enc_lines.append(f"- Unreleased Mortgage ({btype} {vol}/{pg}) in favor of {grantee}.")
+
+                if enc_lines:
+                    self.encumbrance_text = "\n".join(enc_lines)
+                else:
+                    self.encumbrance_text = "- None of record."
         except Exception as e:
             print("Error loading data for email:", e)
 
@@ -259,7 +305,6 @@ class SubmissionEmailDialog(tk.Toplevel):
 
         # Update subject line
         if use_subdiv and lot:
-            # Clean subdivision lot description for subject
             subdiv_clean = re.sub(r'\(Subdivision\)', '', lot, flags=re.IGNORECASE).strip()
             subject = f"Abstract Completed: PID {self.parcel_num} ({proj}); {subdiv_clean}"
         else:
@@ -317,7 +362,6 @@ David Michalove"""
         subject = self.subject_var.get().strip()
         body = self.text_area.get("1.0", tk.END).strip()
         
-        # Open with blank 'to' field for manual verification
         gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&su={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
         try:
             webbrowser.open(gmail_url)
@@ -328,7 +372,6 @@ David Michalove"""
         subject = self.subject_var.get().strip()
         body = self.text_area.get("1.0", tk.END).strip()
         
-        # Open with blank 'to' field for manual verification
         mailto_url = f"mailto:?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
         try:
             if os.name == 'posix':
@@ -339,10 +382,11 @@ David Michalove"""
             messagebox.showerror("Error", f"Could not launch mail client: {e}", parent=self)
 
     def save_to_file(self):
-        if not self.pid_dir or not os.path.exists(self.pid_dir):
+        target_dir = self.pid_dir or self.raw_pid_dir
+        if not target_dir or not os.path.exists(target_dir):
             messagebox.showerror("Error", "PID directory not found", parent=self)
             return
-        target_path = os.path.join(self.pid_dir, f"PID {self.parcel_num} Submission Email.txt")
+        target_path = os.path.join(target_dir, f"PID {self.parcel_num} Submission Email.txt")
         try:
             with open(target_path, "w") as f:
                 f.write(f"Subject: {self.subject_var.get().strip()}\n\n" + self.text_area.get("1.0", tk.END).strip())
