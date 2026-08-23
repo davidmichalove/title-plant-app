@@ -33,7 +33,7 @@ class SubmissionEmailDialog(tk.Toplevel):
 
     def _resolve_active_pid_dir(self, base_dir, parcel_num):
         if not base_dir or not os.path.exists(base_dir):
-            return base_dir, "Norma North I, II"
+            return base_dir, "Norma North"
             
         # Check if there is an inner PID folder with project name in parens: PID 42-00125.000 (Norma North I, II)
         sub_folders = [d for d in glob.glob(os.path.join(base_dir, "*")) if os.path.isdir(d)]
@@ -42,26 +42,24 @@ class SubmissionEmailDialog(tk.Toplevel):
         if inner_pids:
             inner = inner_pids[0]
             m = re.search(r'\((.*?)\)', os.path.basename(inner))
-            proj = m.group(1).strip() if m else "Norma North I, II"
+            proj = m.group(1).strip() if m else "Norma North"
             return inner, proj
         else:
             m = re.search(r'\((.*?)\)', os.path.basename(base_dir))
-            proj = m.group(1).strip() if m else "Norma North I, II"
+            proj = m.group(1).strip() if m else "Norma North"
             return base_dir, proj
 
     def _load_parcel_data(self):
-        # 1. Location & Acreage defaults
+        # Dynamic Initializers (No hardcoded fallback strings)
         self.twp = "Warren"
         self.t_num = "8N"
         self.r_num = "6W"
         self.sec_num = "21"
-        self.is_village = True
-        self.village = "Within the Village of Barnesville"
+        self.is_village = False
+        self.village = ""
         self.is_subdivision = False
-        self.subdiv_name = ""
-        self.lot_number = ""
-        self.subdivision_lot_text = "Lot 143 of the Shoe Factory Addition (Subdivision)"
-        self.acreage = "0.134068"
+        self.subdivision_lot_text = "Tract #1"
+        self.acreage = "0.000000"
         self.encumbrance_text = "- None of record."
 
         # Query GIS
@@ -81,34 +79,57 @@ class SubmissionEmailDialog(tk.Toplevel):
                 if raw.get("r"): self.r_num = f"{raw.get('r')}W"
                 if raw.get("sec"): self.sec_num = str(raw.get("sec"))
 
-                # Municipality / Village
-                polsub = raw.get("polsub", "")
-                if polsub and "BARNE" in polsub.upper():
-                    self.is_village = True
-                    self.village = "Within the Village of Barnesville"
-                elif polsub:
-                    self.is_village = True
-                    self.village = f"Within the {polsub.title()}"
+                # Municipality / Village detection
+                polsub = raw.get("polsub", "").strip()
+                if polsub and polsub.upper() not in ["NONE", "NAN", ""]:
+                    if "BARNE" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the Village of Barnesville"
+                    elif "BEL" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the Village of Bellaire"
+                    elif "BET" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the Village of Bethesda"
+                    elif "BRI" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the City of Bridgeport"
+                    elif "MAR" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the City of Martins Ferry"
+                    elif "STC" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the City of St. Clairsville"
+                    elif "SHA" in polsub.upper():
+                        self.is_village = True
+                        self.village = "Within the Village of Shadyside"
+                    else:
+                        self.is_village = True
+                        self.village = f"Within the Village of {polsub.title()}"
                 else:
                     self.is_village = False
+                    self.village = ""
 
-                # Subdivision detection
+                # Dynamic Subdivision detection from GIS fields
                 subdiv = raw.get("subdiv", "").strip()
                 parcel_lot = raw.get("parcel", "").strip()
-                if subdiv and subdiv.upper() != "NONE" and subdiv.upper() != "NAN":
+                desc = raw.get("desc_", "").strip()
+
+                if subdiv and subdiv.upper() not in ["NONE", "NAN", ""]:
                     self.is_subdivision = True
                     subdiv_clean = re.sub(r'\(MAP\)', '', subdiv, flags=re.IGNORECASE).strip().title()
-                    self.subdiv_name = subdiv_clean
-                    self.lot_number = parcel_lot or "143"
-                    self.subdivision_lot_text = f"Lot {self.lot_number} of the {subdiv_clean} (Subdivision)"
+                    lot_str = f"Lot {parcel_lot}" if parcel_lot and parcel_lot.upper() not in ["NONE", "NAN"] else "Lot"
+                    self.subdivision_lot_text = f"{lot_str} of the {subdiv_clean} (Subdivision)"
+                elif desc and "LOT" in desc.upper():
+                    self.is_subdivision = True
+                    self.subdivision_lot_text = desc.title()
                 else:
-                    desc = raw.get("desc_", "").strip()
-                    if desc:
-                        self.subdivision_lot_text = desc.title()
+                    self.is_subdivision = False
+                    self.subdivision_lot_text = "Tract #1"
 
                 # Acreage from GIS
                 ac = raw.get("acres", "") or raw.get("calcacres", "")
-                if ac and ac != "0" and ac != "0.00000000":
+                if ac and str(ac).strip() not in ["0", "0.0", "0.00000000", ""]:
                     try:
                         self.acreage = f"{float(ac):.6f}"
                     except: pass
@@ -123,9 +144,13 @@ class SubmissionEmailDialog(tk.Toplevel):
                         wb = openpyxl.load_workbook(valid_or[0], data_only=True)
                         ws = wb.active
                         or_ac = ws["B7"].value
-                        if or_ac and str(or_ac).strip() not in ["0.0", "0", "<ACRES_IN2>"]:
-                            self.acreage = str(or_ac).strip()
-                            break
+                        if or_ac is not None:
+                            import datetime
+                            if not isinstance(or_ac, (datetime.datetime, datetime.date)):
+                                ac_str = str(or_ac).strip()
+                                if ac_str not in ["0.0", "0", "<ACRES_IN2>"] and re.search(r'^[0-9\.]+$', ac_str):
+                                    self.acreage = ac_str
+                                    break
 
             # Compile encumbrances dynamically from the Runsheet (leases, easements, unreleased mortgages)
             data = or_compiler_engine.ORCompilerEngine.compile_data(self.pid_dir, self.parcel_num)
@@ -303,7 +328,7 @@ class SubmissionEmailDialog(tk.Toplevel):
         parse = self.parse_used_var.get().strip()
         billed = self.billed_var.get().strip()
 
-        # Update subject line
+        # Update subject line dynamically based on lot/subdivision text
         if use_subdiv and lot:
             subdiv_clean = re.sub(r'\(Subdivision\)', '', lot, flags=re.IGNORECASE).strip()
             subject = f"Abstract Completed: PID {self.parcel_num} ({proj}); {subdiv_clean}"
