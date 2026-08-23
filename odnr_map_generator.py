@@ -4,6 +4,18 @@ import time
 from playwright.sync_api import sync_playwright
 
 def generate_odnr_map(parcel_num, output_dir):
+    # Ensure map goes to WELL INFO directory if present
+    if output_dir and os.path.exists(output_dir):
+        if os.path.basename(output_dir) == "MAPS":
+            parent_pid = os.path.dirname(output_dir)
+            well_sub = os.path.join(parent_pid, "WELL INFO")
+            if os.path.exists(well_sub):
+                output_dir = well_sub
+        else:
+            well_sub = os.path.join(output_dir, "WELL INFO")
+            if os.path.exists(well_sub):
+                output_dir = well_sub
+
     with sync_playwright() as p:
         # User Data Directory for caching (skips disclaimer on subsequent runs)
         user_data_dir = os.path.join(os.path.expanduser("~"), ".odnr_playwright_cache")

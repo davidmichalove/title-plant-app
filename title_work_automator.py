@@ -2850,7 +2850,7 @@ class AutomatorApp:
                                 self.log(f"Spawning background process for Belmont County GIS Map...")
                                 subprocess.run(["python3", "/Volumes/davidlls/assignments/app/gis_map_generator.py", parcel_num, maps_dir])
                                 self.log(f"Belmont GIS complete. Spawning ODNR Map generator...")
-                                subprocess.run(["python3", "/Volumes/davidlls/assignments/app/odnr_map_generator.py", parcel_num, maps_dir])
+                                subprocess.run(["python3", "/Volumes/davidlls/assignments/app/odnr_map_generator.py", parcel_num, well_dir])
                                 self.log(f"All background map generation complete!")
                             threading.Thread(target=trigger_gis, daemon=True).start()
                             
