@@ -316,9 +316,9 @@ David Michalove"""
     def open_in_gmail(self):
         subject = self.subject_var.get().strip()
         body = self.text_area.get("1.0", tk.END).strip()
-        to_email = "Tawnie.Rizzardo@gmail.com"
         
-        gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&to={urllib.parse.quote(to_email)}&su={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+        # Open with blank 'to' field for manual verification
+        gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&su={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
         try:
             webbrowser.open(gmail_url)
         except Exception as e:
@@ -328,7 +328,8 @@ David Michalove"""
         subject = self.subject_var.get().strip()
         body = self.text_area.get("1.0", tk.END).strip()
         
-        mailto_url = f"mailto:Tawnie.Rizzardo@gmail.com?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+        # Open with blank 'to' field for manual verification
+        mailto_url = f"mailto:?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
         try:
             if os.name == 'posix':
                 subprocess.Popen(['open', mailto_url])
