@@ -12,8 +12,8 @@ class SubmissionEmailDialog(tk.Toplevel):
     def __init__(self, master, pid_dir, parcel_num=None):
         super().__init__(master)
         self.title("✉️ Completion & Submission Email Generator")
-        self.geometry("820x720")
-        self.minsize(700, 550)
+        self.geometry("840x750")
+        self.minsize(720, 560)
         self.transient(master)
         self.attributes("-topmost", True)
 
@@ -62,7 +62,6 @@ class SubmissionEmailDialog(tk.Toplevel):
                         self.acreage = f"{float(ac):.6f}"
                     except: pass
 
-            # Run compiler engine for leases
             data = or_compiler_engine.ORCompilerEngine.compile_data(self.pid_dir, self.parcel_num)
             if data:
                 p_l = data.get("primary_lease")
@@ -88,58 +87,66 @@ class SubmissionEmailDialog(tk.Toplevel):
 
         # Top Parameters Frame
         top_grid = ttk.LabelFrame(main_frame, text="⚙️ Email Parameters", padding=10)
-        top_grid.pack(fill=tk.X, pady=(0, 10))
+        top_grid.pack(fill=tk.X, pady=(0, 8))
 
-        # Row 0: Recipient & Project Name
-        ttk.Label(top_grid, text="Recipient Name:", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w", pady=3)
+        # Row 0: Subject Line Display
+        ttk.Label(top_grid, text="Subject Line:", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w", pady=3)
+        self.subject_var = tk.StringVar()
+        self.subject_entry = ttk.Entry(top_grid, textvariable=self.subject_var, font=("Helvetica", 10, "bold"))
+        self.subject_entry.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(5, 5), pady=3)
+        ttk.Button(top_grid, text="📋 Copy Subject", width=14, command=self.copy_subject).grid(row=0, column=3, sticky="e", pady=3)
+
+        # Row 1: Recipient & Project Name
+        ttk.Label(top_grid, text="Recipient Name:", font=("Helvetica", 10, "bold")).grid(row=1, column=0, sticky="w", pady=3)
         self.recipient_var = tk.StringVar(value="Tawnie,")
-        ttk.Entry(top_grid, textvariable=self.recipient_var, width=15, font=("Helvetica", 10)).grid(row=0, column=1, sticky="w", padx=(5, 15), pady=3)
+        ttk.Entry(top_grid, textvariable=self.recipient_var, width=15, font=("Helvetica", 10)).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=3)
 
-        ttk.Label(top_grid, text="Project Name:", font=("Helvetica", 10, "bold")).grid(row=0, column=2, sticky="w", pady=3)
+        ttk.Label(top_grid, text="Project Name:", font=("Helvetica", 10, "bold")).grid(row=1, column=2, sticky="w", pady=3)
         self.project_var = tk.StringVar(value=self.project_name)
-        ttk.Entry(top_grid, textvariable=self.project_var, width=25, font=("Helvetica", 10)).grid(row=0, column=3, sticky="ew", padx=(5, 0), pady=3)
+        ttk.Entry(top_grid, textvariable=self.project_var, width=25, font=("Helvetica", 10)).grid(row=1, column=3, sticky="ew", padx=(5, 0), pady=3)
 
-        # Row 1: Township / Range / Section
-        ttk.Label(top_grid, text="Township / Range:", font=("Helvetica", 10, "bold")).grid(row=1, column=0, sticky="w", pady=3)
+        # Row 2: Township / Range / Section & Municipality
+        ttk.Label(top_grid, text="Township / Range:", font=("Helvetica", 10, "bold")).grid(row=2, column=0, sticky="w", pady=3)
         self.twp_var = tk.StringVar(value=f"T. {self.t_num}., R. {self.r_num}., {self.twp}")
-        ttk.Entry(top_grid, textvariable=self.twp_var, width=22, font=("Helvetica", 10)).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=3)
+        ttk.Entry(top_grid, textvariable=self.twp_var, width=22, font=("Helvetica", 10)).grid(row=2, column=1, sticky="w", padx=(5, 15), pady=3)
 
-        ttk.Label(top_grid, text="Municipality / Village:", font=("Helvetica", 10, "bold")).grid(row=1, column=2, sticky="w", pady=3)
+        ttk.Label(top_grid, text="Municipality / Village:", font=("Helvetica", 10, "bold")).grid(row=2, column=2, sticky="w", pady=3)
         self.village_var = tk.StringVar(value=self.village)
-        ttk.Entry(top_grid, textvariable=self.village_var, width=25, font=("Helvetica", 10)).grid(row=1, column=3, sticky="ew", padx=(5, 0), pady=3)
+        ttk.Entry(top_grid, textvariable=self.village_var, width=25, font=("Helvetica", 10)).grid(row=2, column=3, sticky="ew", padx=(5, 0), pady=3)
 
-        # Row 2: Section & Lot / Acreage
-        ttk.Label(top_grid, text="Sec / Subdivision / Lot:", font=("Helvetica", 10, "bold")).grid(row=2, column=0, sticky="w", pady=3)
+        # Row 3: Section & Lot / Subdivision
+        ttk.Label(top_grid, text="Sec / Subdivision / Lot:", font=("Helvetica", 10, "bold")).grid(row=3, column=0, sticky="w", pady=3)
         self.lot_var = tk.StringVar(value=f"Sec. {self.sec_num}: {self.subdivision_lot}")
-        ttk.Entry(top_grid, textvariable=self.lot_var, width=35, font=("Helvetica", 10)).grid(row=2, column=1, columnspan=3, sticky="ew", padx=(5, 0), pady=3)
+        ttk.Entry(top_grid, textvariable=self.lot_var, width=35, font=("Helvetica", 10)).grid(row=3, column=1, columnspan=3, sticky="ew", padx=(5, 0), pady=3)
 
-        # Row 3: Acreage & Days Billed
-        ttk.Label(top_grid, text="Containing Acreage:", font=("Helvetica", 10, "bold")).grid(row=3, column=0, sticky="w", pady=3)
+        # Row 4: Acreage & Days Billed
+        ttk.Label(top_grid, text="Containing Acreage:", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w", pady=3)
         self.acres_var = tk.StringVar(value=f"{self.acreage} acres, more or less")
-        ttk.Entry(top_grid, textvariable=self.acres_var, width=22, font=("Helvetica", 10)).grid(row=3, column=1, sticky="w", padx=(5, 15), pady=3)
+        ttk.Entry(top_grid, textvariable=self.acres_var, width=22, font=("Helvetica", 10)).grid(row=4, column=1, sticky="w", padx=(5, 15), pady=3)
 
-        ttk.Label(top_grid, text="Days / Hours Billed:", font=("Helvetica", 10, "bold")).grid(row=3, column=2, sticky="w", pady=3)
+        ttk.Label(top_grid, text="Days / Hours Billed:", font=("Helvetica", 10, "bold")).grid(row=4, column=2, sticky="w", pady=3)
         self.billed_var = tk.StringVar(value="6 hrs")
         b_frame = ttk.Frame(top_grid)
-        b_frame.grid(row=3, column=3, sticky="w", padx=(5, 0), pady=3)
+        b_frame.grid(row=4, column=3, sticky="w", padx=(5, 0), pady=3)
         ttk.Entry(b_frame, textvariable=self.billed_var, width=10, font=("Helvetica", 10)).pack(side=tk.LEFT)
         for h in ["4 hrs", "6 hrs", "8 hrs", "1 Day"]:
             ttk.Button(b_frame, text=h, width=5, command=lambda val=h: [self.billed_var.set(val), self.update_preview()]).pack(side=tk.LEFT, padx=2)
 
-        # Row 4: Prior Title & Parse Used
-        ttk.Label(top_grid, text="Prior Title Used:", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w", pady=3)
+        # Row 5: Prior Title & Parse Used
+        ttk.Label(top_grid, text="Prior Title Used:", font=("Helvetica", 10, "bold")).grid(row=5, column=0, sticky="w", pady=3)
         self.prior_title_var = tk.StringVar(value="Yes.")
         cb_pt = ttk.Combobox(top_grid, textvariable=self.prior_title_var, values=["Yes.", "No.", "None."], width=12, font=("Helvetica", 10))
-        cb_pt.grid(row=4, column=1, sticky="w", padx=(5, 15), pady=3)
+        cb_pt.grid(row=5, column=1, sticky="w", padx=(5, 15), pady=3)
 
-        ttk.Label(top_grid, text="Parse Used:", font=("Helvetica", 10, "bold")).grid(row=4, column=2, sticky="w", pady=3)
+        ttk.Label(top_grid, text="Parse Used:", font=("Helvetica", 10, "bold")).grid(row=5, column=2, sticky="w", pady=3)
         self.parse_used_var = tk.StringVar(value="Yes. The application functioned smoothly.")
         cb_parse = ttk.Combobox(top_grid, textvariable=self.parse_used_var, values=["Yes. The application functioned smoothly.", "No.", "Yes."], width=35, font=("Helvetica", 10))
-        cb_parse.grid(row=4, column=3, sticky="ew", padx=(5, 0), pady=3)
+        cb_parse.grid(row=5, column=3, sticky="ew", padx=(5, 0), pady=3)
 
+        top_grid.columnconfigure(1, weight=1)
         top_grid.columnconfigure(3, weight=1)
 
-        # Trace variable changes to auto update preview
+        # Trace variable changes
         for v in [self.recipient_var, self.project_var, self.twp_var, self.village_var, self.lot_var, self.acres_var, self.billed_var, self.prior_title_var, self.parse_used_var]:
             v.trace_add("write", lambda *args: self.update_preview())
 
@@ -158,10 +165,10 @@ class SubmissionEmailDialog(tk.Toplevel):
         bottom_bar = ttk.Frame(main_frame, padding=5)
         bottom_bar.pack(fill=tk.X, pady=(5, 0))
 
-        self.copy_btn = ttk.Button(bottom_bar, text="📋 Copy to Clipboard", command=self.copy_to_clipboard)
+        self.copy_btn = ttk.Button(bottom_bar, text="📋 Copy Full Email Body", command=self.copy_to_clipboard)
         self.copy_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        ttk.Button(bottom_bar, text="✉️ Open in Default Mail Client", command=self.open_in_mail_client).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_bar, text="✉️ Open in Mail Client", command=self.open_in_mail_client).pack(side=tk.LEFT, padx=5)
         ttk.Button(bottom_bar, text="💾 Save to Folder", command=self.save_to_file).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(bottom_bar, text="Close (Esc)", command=self.destroy).pack(side=tk.RIGHT)
@@ -178,6 +185,10 @@ class SubmissionEmailDialog(tk.Toplevel):
         pt = self.prior_title_var.get().strip()
         parse = self.parse_used_var.get().strip()
         billed = self.billed_var.get().strip()
+
+        # Update subject line
+        subject = f"Abstract complete: PID {self.parcel_num} ({proj})"
+        self.subject_var.set(subject)
 
         village_line = f"  {village}\n" if village else ""
 
@@ -202,22 +213,26 @@ Encumbrances:
 Best,
 David Michalove"""
 
-        # Save cursor position if any
         self.text_area.delete("1.0", tk.END)
         self.text_area.insert("1.0", body)
+
+    def copy_subject(self):
+        subj = self.subject_var.get().strip()
+        self.clipboard_clear()
+        self.clipboard_append(subj)
+        messagebox.showinfo("Copied", f"Subject copied to clipboard:\n\n{subj}", parent=self)
 
     def copy_to_clipboard(self):
         text = self.text_area.get("1.0", tk.END).strip()
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.copy_btn.config(text="✅ Copied to Clipboard!")
-        self.after(2000, lambda: self.copy_btn.config(text="📋 Copy to Clipboard"))
+        self.copy_btn.config(text="✅ Copied Body to Clipboard!")
+        self.after(2000, lambda: self.copy_btn.config(text="📋 Copy Full Email Body"))
 
     def open_in_mail_client(self):
-        subject = f"PID {self.parcel_num} ({self.project_var.get().strip()}) - Complete"
+        subject = self.subject_var.get().strip()
         body = self.text_area.get("1.0", tk.END).strip()
         
-        # Build mailto URI
         mailto_url = f"mailto:Tawnie.Rizzardo@gmail.com?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
         try:
             if os.name == 'posix':
@@ -234,7 +249,7 @@ David Michalove"""
         target_path = os.path.join(self.pid_dir, f"PID {self.parcel_num} Submission Email.txt")
         try:
             with open(target_path, "w") as f:
-                f.write(self.text_area.get("1.0", tk.END).strip())
+                f.write(f"Subject: {self.subject_var.get().strip()}\n\n" + self.text_area.get("1.0", tk.END).strip())
             messagebox.showinfo("Saved", f"Saved submission email to:\n{os.path.basename(target_path)}", parent=self)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save email: {e}", parent=self)
