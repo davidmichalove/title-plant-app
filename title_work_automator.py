@@ -168,6 +168,8 @@ class AutomatorApp:
         self.status_btn.pack(side=tk.LEFT, padx=3)
         self.open_or_btn = ttk.Button(btn_container_top, text="OR", command=self.open_ownership_report)
         self.open_or_btn.pack(side=tk.LEFT, padx=3)
+        self.email_btn = ttk.Button(btn_container_top, text="Email", command=self.open_submission_email)
+        self.email_btn.pack(side=tk.LEFT, padx=3)
         self.recorder_btn = ttk.Button(btn_container_top, text="B-Rcrdr", command=self.open_belmont_recorder)
         self.recorder_btn.pack(side=tk.LEFT, padx=3)
 
@@ -522,6 +524,11 @@ class AutomatorApp:
         self.root.bind("<Control-g>", self.open_belmont_gis)
         self.root.bind("<Command-G>", self.open_belmont_gis)
         self.root.bind("<Control-G>", self.open_belmont_gis)
+
+        self.root.bind("<Command-Shift-E>", self.open_submission_email)
+        self.root.bind("<Command-Shift-e>", self.open_submission_email)
+        self.root.bind("<Control-Shift-E>", self.open_submission_email)
+        self.root.bind("<Control-Shift-e>", self.open_submission_email)
 
         self.root.bind("<Command-r>", self.open_belmont_recorder)
         self.root.bind("<Control-r>", self.open_belmont_recorder)
@@ -4237,6 +4244,13 @@ end tell'''
             
         ttk.Button(dialog, text="Save to Notes", command=on_save).grid(row=4, column=0, columnspan=2, pady=15)
         
+    def open_submission_email(self, event=None):
+        pid = self.parcel_entry.get().strip()
+        pid_dir = self.get_parcel_dir(pid) if pid and os.path.exists(self.get_parcel_dir(pid)) else None
+        import submission_email_dialog
+        submission_email_dialog.SubmissionEmailDialog(self.root, pid_dir, parcel_num=pid)
+        return "break"
+
     def open_pdf_combiner(self):
         pid = self.parcel_entry.get().strip()
         pid_dir = self.get_parcel_dir(pid) if pid and os.path.exists(self.get_parcel_dir(pid)) else None
@@ -4288,6 +4302,7 @@ end tell'''
             ("Cmd + O / Ctrl + O", "Main Portal", "Open active parcel's Ownership Report (*OR*.xlsx)"),
             ("Cmd + G / Ctrl + G", "Main Portal", "Open Belmont GIS zoomed to active parcel"),
             ("Cmd + R / Ctrl + R", "Main Portal", "Open Belmont Recorder website (Kofile)"),
+            ("Cmd+Shift+E / Ctrl+Shift+E", "Main Portal", "✉️ Open Completion & Submission Email Generator"),
             
             # Editor
             ("Cmd+Shift+O / Ctrl+Shift+O", "RS / Gemini", "📊 Sync Runsheet to Ownership Report (*OR*.xlsx)"),
