@@ -1795,31 +1795,32 @@ class RunsheetEditorWindow(tk.Toplevel):
                     pg_col = None
                     for i, h in enumerate(self.headers):
                         hl = h.lower()
-                        if "vol" in hl and "page" not in hl:
+                        if "vol" in hl and "page" not in hl and "book" not in hl:
                             vol_col = i + 1
                         elif "page" in hl and "vol" not in hl:
                             pg_col = i + 1
+                    if not vol_col: vol_col = 3
+                    if not pg_col: pg_col = 4
                             
-                    if vol_col and pg_col:
-                        for row_idx in range(3, self.ws.max_row + 1):
-                            r_vol = str(self.ws.cell(row=row_idx, column=vol_col).value or "").strip().lstrip('0') or '0'
-                            r_pg = str(self.ws.cell(row=row_idx, column=pg_col).value or "").strip().lstrip('0') or '0'
-                            if r_vol == clean_v and r_pg == clean_p:
-                                if self.current_row_idx:
-                                    try: self.save_row(show_msg=False)
-                                    except Exception as e: print("SAVE ROW FAILED DURING JUMP:", e)
-                                if row_idx not in self.row_indices:
-                                    self.search_var.set("")
-                                    self.filter_var.set("All")
-                                    self.load_rows()
-                                    
-                                if row_idx in self.row_indices:
-                                    lb_idx = self.row_indices.index(row_idx)
-                                    self.listbox.selection_clear(0, tk.END)
-                                    self.listbox.selection_set(lb_idx)
-                                    self.listbox.see(lb_idx)
-                                    self.on_select(None)
-                                break
+                    for row_idx in range(3, self.ws.max_row + 1):
+                        r_vol = str(self.ws.cell(row=row_idx, column=vol_col).value or "").strip().lstrip('0') or '0'
+                        r_pg = str(self.ws.cell(row=row_idx, column=pg_col).value or "").strip().lstrip('0') or '0'
+                        if r_vol == clean_v and r_pg == clean_p:
+                            if self.current_row_idx:
+                                try: self.save_row(show_msg=False)
+                                except Exception as e: print("SAVE ROW FAILED DURING JUMP:", e)
+                            if row_idx not in self.row_indices:
+                                self.search_var.set("")
+                                self.filter_var.set("All")
+                                self.load_rows()
+                                
+                            if row_idx in self.row_indices:
+                                lb_idx = self.row_indices.index(row_idx)
+                                self.listbox.selection_clear(0, tk.END)
+                                self.listbox.selection_set(lb_idx)
+                                self.listbox.see(lb_idx)
+                                self.on_select(None)
+                            break
                     
                     # 2. Try to open local document PDF
                     import glob, subprocess
@@ -1830,7 +1831,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                         for fpath in glob.glob(os.path.join(self.pid_dir, "**", ext), recursive=True):
                             fname = os.path.basename(fpath)
                             if fname.startswith("._"): continue
-                            if f"{clean_v}-{clean_p}" in fname or f"{clean_v}_{clean_p}" in fname or f"{vol}-{pg}" in fname or f"{vol}_{pg}" in fname:
+                            if re.search(rf'(?<!\d){clean_v}[-_/ ]+{clean_p}(?!\d)', fname):
                                 found_doc = fpath
                                 break
                         if found_doc: break
@@ -1877,8 +1878,8 @@ class RunsheetEditorWindow(tk.Toplevel):
         
         import re
         patterns = [
-            r'\b(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB)\s*(\d{1,4})\s*[-/]\s*(\d{1,4})\b',
-            r'\bVol(?:ume|\.)?\s*(\d{1,4})\s*,?\s*P(?:a)?g(?:e|\.)?\s*(\d{1,4})\b',
+            r'\b(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|Book|Record)\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
+            r'\bVol(?:ume|\.)?\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
             r'(?<!\d)(\d{1,4})\s*[-/]\s*(\d{1,4})(?!\d)'
         ]
         seen_spans = []

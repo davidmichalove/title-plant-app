@@ -3360,27 +3360,31 @@ end tell'''
                         if t.startswith("link_val_"):
                             vol_pg = t.split("link_val_")[1]
                             vol, pg = vol_pg.split('-')
+                            clean_v = str(vol).strip().lstrip('0') or '0'
+                            clean_p = str(pg).strip().lstrip('0') or '0'
+                            vol_pad = vol.zfill(3) if vol.isdigit() else vol
+                            vol_pad_4 = vol.zfill(4) if vol.isdigit() else vol
+                            
                             import glob, subprocess
                             pid_dir = self.get_parcel_dir(self.parcel_entry.get().strip())
                             
-                            # 1. Search DOCS folder first
+                            # 1. Search DOCS and parcel folder first
                             local_docs = []
                             for ext in ("*.pdf", "*.txt", "*.doc", "*.docx", "*.rtf", "*.png", "*.jpg", "*.tif", "*.tiff"):
-                                local_docs.extend(glob.glob(os.path.join(pid_dir, "DOCS", "**", ext), recursive=True))
+                                local_docs.extend(glob.glob(os.path.join(pid_dir, "**", ext), recursive=True))
                                 
                             for doc in local_docs:
                                 fname = os.path.basename(doc)
-                                if f"{vol}-{pg}" in fname or f"{vol}_{pg}" in fname:
+                                if fname.startswith("._"): continue
+                                if re.search(rf'(?<!\d){clean_v}[-_/ ]+{clean_p}(?!\d)', fname):
                                     try:
                                         if os.name == 'nt': os.startfile(doc)
-                                        else: subprocess.call(('open', doc))
+                                        else: subprocess.Popen(['open', doc])
                                         self.log(f"Opened {fname} from Notes link!")
                                         return
                                     except: pass
                                     
                             # 2. If not found locally, search archives instantly using targeted paths
-                            vol_pad = vol.zfill(3) if vol.isdigit() else vol
-                            vol_pad_4 = vol.zfill(4) if vol.isdigit() else vol
                             archives = [
                                 f"/Volumes/davidlls/drive/DEEDS/DEED {vol_pad}",
                                 f"/Volumes/davidlls/drive/MTGS/MTG {vol_pad}",
@@ -3399,17 +3403,19 @@ end tell'''
                                     shutil.copy2(doc_path, dest_path)
                                 try:
                                     if os.name == 'nt': os.startfile(dest_path)
-                                    else: subprocess.call(('open', dest_path))
+                                    else: subprocess.Popen(['open', dest_path])
                                     self.log(f"Copied {os.path.basename(doc_path)} to docket and opened it!")
                                 except: pass
                                 return True
                                 
                             for archive_dir in archives:
                                 if os.path.exists(archive_dir):
-                                    for ext in ("*.pdf", "*.tif", "*.jpg"):
-                                        for doc in glob.glob(os.path.join(archive_dir, f"*{vol}-{pg}*{ext}")):
+                                    for ext in ("*.pdf", "*.tif", "*.jpg", "*.png"):
+                                        for doc in glob.glob(os.path.join(archive_dir, f"*{clean_v}-{clean_p}*{ext}")):
                                             if handle_archive_match(doc): return
-                                        for doc in glob.glob(os.path.join(archive_dir, f"*{vol}_{pg}*{ext}")):
+                                        for doc in glob.glob(os.path.join(archive_dir, f"*{clean_v}_{clean_p}*{ext}")):
+                                            if handle_archive_match(doc): return
+                                        for doc in glob.glob(os.path.join(archive_dir, f"*{clean_v} {clean_p}*{ext}")):
                                             if handle_archive_match(doc): return
                 except Exception as ex:
                     print(ex)
@@ -3417,50 +3423,30 @@ end tell'''
             self.note_text.tag_bind("hyperlink", "<Button-1>", on_link_click)
             
             import re
-            # Dynamically convert "Vol 123 Pg 456" or "123-456" into <link:...> if it exists in DOCS
-            try:
-                pid_dir = self.get_parcel_dir(self.parcel_entry.get().strip())
-                docs_dir = os.path.join(pid_dir, "DOCS")
-                if os.path.exists(docs_dir):
-                    valid_vol_pgs = []
-                    for root, dirs, files in os.walk(docs_dir):
-                        for f in files:
-                            if not f.startswith("._"):
-                                m = re.search(r'(\d+)_(\d+)', f)
-                                if m:
-                                    valid_vol_pgs.append(f"{m.group(1)}-{m.group(2)}")
-                                m = re.search(r'(\d+)-(\d+)', f)
-                                if m:
-                                    valid_vol_pgs.append(f"{m.group(1)}-{m.group(2)}")
-                    
-                    # Convert raw text to <link:X-Y> if it's not already
-                    for vpg in set(valid_vol_pgs):
-                        v, p = vpg.split('-')
-                        # Look for "Vol 123 Pg 456"
-                        pattern1 = re.compile(r'(?<!<link:)Vol(?:ume|\.)?\s*' + v + r'\b\s*P(?:a)?g(?:e|\.)?\s*' + p + r'\b(?!>)', re.IGNORECASE)
-                        content = pattern1.sub(f"<link:{vpg}>", content)
-                        # Look for "123-456"
-                        pattern2 = re.compile(r'(?<!<link:)(?<!\d)' + v + r'-' + p + r'(?!\d)(?!>)')
-                        content = pattern2.sub(f"<link:{vpg}>", content)
-                        # Look for "123/456"
-                        pattern3 = re.compile(r'(?<!<link:)(?<!\d)' + v + r'/' + p + r'(?!\d)(?!>)')
-                        content = pattern3.sub(f"<link:{vpg}>", content)
-            except Exception as ex:
-                print(ex)
+            # Convert any existing <link:X-Y> to clean X/Y text
+            clean_content = re.sub(r"<link:([0-9a-zA-Z\-]+)>", lambda m: m.group(1).replace('-', '/'), content)
+            self.note_text.insert("1.0", clean_content)
             
-            last_idx = 0
-            for match in re.finditer(r"<link:([0-9a-zA-Z\-]+)>", content):
-                start, end = match.span()
-                vol_pg = match.group(1)
-                self.note_text.insert(tk.END, content[last_idx:start])
-                
-                # Insert the clickable text
-                display_text = vol_pg.replace("-", "/")
-                tag_name = f"link_val_{vol_pg}"
-                self.note_text.insert(tk.END, display_text, ("hyperlink", tag_name))
-                last_idx = end
-                
-            self.note_text.insert(tk.END, content[last_idx:])
+            # Tag all volume/page occurrences as clickable hyperlinks
+            patterns = [
+                r'\b(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|Book|Record)\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
+                r'\bVol(?:ume|\.)?\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
+                r'(?<!\d)(\d{1,4})\s*[-/]\s*(\d{1,4})(?!\d)'
+            ]
+            seen_spans = []
+            for pat in patterns:
+                for m in re.finditer(pat, clean_content, re.IGNORECASE):
+                    start, end = m.start(), m.end()
+                    if any(s <= start < e or s < end <= e for s, e in seen_spans):
+                        continue
+                    seen_spans.append((start, end))
+                    v, p = m.group(1), m.group(2)
+                    vpg = f"{v}-{p}"
+                    start_idx = f"1.0+{start}c"
+                    end_idx = f"1.0+{end}c"
+                    self.note_text.tag_add("hyperlink", start_idx, end_idx)
+                    self.note_text.tag_add(f"link_val_{vpg}", start_idx, end_idx)
+                    
             self.current_note_id = int(note_id)
         except Exception as e:
             self.log(f"Error loading note: {e}")
