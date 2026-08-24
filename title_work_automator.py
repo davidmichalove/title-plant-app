@@ -3838,10 +3838,36 @@ end tell'''
         top_frame = ttk.Frame(dialog, padding=(12, 10))
         top_frame.pack(fill=tk.X)
         
+        # Dark mode detection for macOS / Night mode
+        is_dark = False
+        try:
+            import subprocess
+            res = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True)
+            is_dark = "Dark" in res.stdout
+        except:
+            is_dark = False
+
+        if is_dark:
+            bg_even = "#202020"
+            bg_odd = "#2b2b2b"
+            bg_checked = "#1a365d"
+            fg_text = "#ffffff"
+            fg_checked = "#63b3ed"
+            sub_color = "#a0aec0"
+            count_color = "#63b3ed"
+        else:
+            bg_even = "#ffffff"
+            bg_odd = "#f7fafc"
+            bg_checked = "#ebf8ff"
+            fg_text = "#1a202c"
+            fg_checked = "#2b6cb0"
+            sub_color = "#4a5568"
+            count_color = "#2b6cb0"
+
         title_lbl = ttk.Label(top_frame, text=f"📋 Search Results for: {owner_name}", font=("Helvetica", 14, "bold"))
         title_lbl.pack(anchor=tk.W)
         
-        sub_lbl = ttk.Label(top_frame, text=f"Found {len(records)} records on Belmont County Recorder. Select the documents you wish to download below:", foreground="#555555")
+        sub_lbl = ttk.Label(top_frame, text=f"Found {len(records)} records on Belmont County Recorder. Select the documents you wish to download below:", foreground=sub_color)
         sub_lbl.pack(anchor=tk.W, pady=(2, 6))
         
         folder_frame = ttk.Frame(top_frame)
@@ -3875,7 +3901,7 @@ end tell'''
         btn_sel_mtgs = ttk.Button(toolbar, text="Only Mortgages", width=13)
         btn_sel_mtgs.pack(side=tk.LEFT, padx=2)
         
-        count_lbl = ttk.Label(toolbar, text="Selected: 0 of 0", font=("Helvetica", 11, "bold"), foreground="#0066cc")
+        count_lbl = ttk.Label(toolbar, text="Selected: 0 of 0", font=("Helvetica", 11, "bold"), foreground=count_color)
         count_lbl.pack(side=tk.RIGHT, padx=5)
         
         # Treeview Frame
@@ -3911,9 +3937,9 @@ end tell'''
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
         
-        tree.tag_configure("even", background="#ffffff")
-        tree.tag_configure("odd", background="#f8f9fa")
-        tree.tag_configure("checked", background="#e8f4fd")
+        tree.tag_configure("even", background=bg_even, foreground=fg_text)
+        tree.tag_configure("odd", background=bg_odd, foreground=fg_text)
+        tree.tag_configure("checked", background=bg_checked, foreground=fg_checked)
         
         def refresh_table(*args):
             query = filter_var.get().lower().strip()
