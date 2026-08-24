@@ -71,24 +71,28 @@ def get_subject_land_context(parcel_dir):
 
     return "\n".join(subject_info)
 
+def find_book_type(vol, pg, is_mortgage=False, parcel_dir=None):
+    vol = str(vol).strip()
+    pg = str(pg).strip()
+    if parcel_dir and os.path.exists(parcel_dir):
+        import glob
+        for p in glob.glob(os.path.join(parcel_dir, "**", "*.pdf"), recursive=True):
+            fname = os.path.basename(p).upper()
+            m = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*[-_ ]\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
+            if m: return m.group(1).upper()
+            m2 = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
+            if m2: return m2.group(1).upper()
+    try:
+        v_num = int(vol)
+        if is_mortgage:
+            return "MR" if v_num <= 950 else "OR"
+        else:
+            return "DR" if v_num <= 805 else "OR"
+    except:
+        return "MR" if is_mortgage else "DR"
+
 def normalize_prior_ref_text(text, parcel_dir=None):
     if not text: return text
-    
-    def find_book_type(vol, pg):
-        vol = str(vol).strip()
-        pg = str(pg).strip()
-        if parcel_dir and os.path.exists(parcel_dir):
-            import glob
-            for p in glob.glob(os.path.join(parcel_dir, "**", "*.pdf"), recursive=True):
-                fname = os.path.basename(p).upper()
-                m = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*[-_ ]\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
-                if m: return m.group(1).upper()
-                m2 = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
-                if m2: return m2.group(1).upper()
-        try:
-            return "DR" if int(vol) <= 805 else "OR"
-        except:
-            return "DR"
 
     def repl_prior_ref(m):
         full_ref = m.group(1)
@@ -111,14 +115,16 @@ def normalize_prior_ref_text(text, parcel_dir=None):
         if m_vol_pg:
             vol = m_vol_pg.group(1)
             pg = m_vol_pg.group(2)
-            btype = find_book_type(vol, pg)
+            is_mort = "release" in text.lower() or "mortgage" in text.lower()
+            btype = find_book_type(vol, pg, is_mortgage=is_mort, parcel_dir=parcel_dir)
             return f"Prior Ref: {btype} {vol}/{pg}"
 
         m_bare = re.search(r'\b(\d{1,4})[/-](\d{1,4})\b', full_ref)
         if m_bare:
             vol = m_bare.group(1)
             pg = m_bare.group(2)
-            btype = find_book_type(vol, pg)
+            is_mort = "release" in text.lower() or "mortgage" in text.lower()
+            btype = find_book_type(vol, pg, is_mortgage=is_mort, parcel_dir=parcel_dir)
             return f"Prior Ref: {btype} {vol}/{pg}"
 
         return m.group(0)
@@ -128,9 +134,27 @@ def normalize_prior_ref_text(text, parcel_dir=None):
 
 def normalize_gemini_comment(text, parcel_dir=None):
     if not text: return text
-    text = normalize_prior_ref_text(text, parcel_dir=parcel_dir)
     
-    # Ensure ARTI is followed by "Conveys all right, title, and interest"
+    # 1. Release of Mortgage / Satisfaction formatting
+    if re.search(r'(?:release|satisfaction)\s+(?:of\s+)?mortgage|releases\s+mortgage', text, re.IGNORECASE):
+        def repl_rel(m):
+            btype = m.group(1) or ""
+            vol = m.group(2)
+            pg = m.group(3)
+            if not btype or btype.upper() in ["BOOK", "VOL", "VOLUME", "RECORD", ""]:
+                btype = find_book_type(vol, pg, is_mortgage=True, parcel_dir=parcel_dir)
+            else:
+                btype = btype.upper()
+            return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
+
+        rel_pattern = r'(?:Releases?\s+(?:of\s+)?mortgage\s+(?:recorded\s+in\s+|in\s+)?|Releases\s+recorded\s+in\s+)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?([A-Za-z]+)?\s*[:.]?\s*(\d+)[,\s/-]+(?:Page|Pg|p\.?)?\s*(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+        text = re.sub(rel_pattern, repl_rel, text, flags=re.IGNORECASE)
+
+    # 2. Normalize Prior References
+    text = normalize_prior_ref_text(text, parcel_dir=parcel_dir)
+    text = re.sub(r'([^\n])\s*(Prior Ref:)', r'\1\n\2', text)
+    
+    # 3. Ensure ARTI is followed by "Conveys all right, title, and interest"
     if text.startswith("ARTI\n"):
         rest = text[5:].strip()
         if not re.search(r'convey.*right.*title.*interest', rest, re.IGNORECASE):
@@ -216,8 +240,10 @@ REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
   No dower mentioned
   Release: MR 107/710
 
-- Release of Mortgage:
-  Releases mortgage recorded in MR 988/778
+- Release of Mortgage / Satisfaction:
+  Releases mortgage recorded in MR 734/604
+  Full satisfaction. Clears lien from the property title.
+  Prior Ref: MR 734/604
 
 - Oil & Gas Lease / Memo:
   PT 5 yrs
@@ -243,10 +269,12 @@ STRICT RULES FOR THE "comments" FIELD:
    Maturity Date: MM/DD/YYYY (or "Not stated")
    Dower released (or "No dower mentioned")
    Release: [Book] [Vol]/[Pg] (if released, or omit if unreleased)
-5. CONVEYANCE: For fee simple conveyance, use "ARTI" followed on the next line by "Conveys all right, title, and interest" (or state fractional interest, e.g. "Undivided 1/2 interest").
-6. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
-7. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
-8. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
+5. RELEASES & SATISFACTIONS:
+   State "Releases mortgage recorded in [Book] [Vol]/[Pg]" on line 1, followed by "Full satisfaction. Clears lien from the property title." on line 2, and "Prior Ref: [Book] [Vol]/[Pg]" on line 3.
+6. CONVEYANCE: For fee simple conveyance, use "ARTI" followed on the next line by "Conveys all right, title, and interest" (or state fractional interest, e.g. "Undivided 1/2 interest").
+7. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
+8. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
+9. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
 
 {meta_info}
 

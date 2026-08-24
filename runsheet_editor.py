@@ -2757,6 +2757,22 @@ class RunsheetEditorWindow(tk.Toplevel):
             return f"\n\n{s}\n\n"
         txt = re.sub(r'(?:^|(?<=\.))\s*((?:EXCEPTING|EXCEPTIONS?|RESERVES?|RESERVATIONS?|RESERVING)\b[^.\n]*(?:\.|$))', format_own_line, txt, flags=re.IGNORECASE)
 
+        # RELEASES / SATISFACTIONS
+        if re.search(r'(?:release|satisfaction)\s+(?:of\s+)?mortgage|releases\s+mortgage', txt, re.IGNORECASE) or "release" in inst_type.lower() or "satisfaction" in inst_type.lower():
+            def repl_rel(m):
+                btype = m.group(1) or ""
+                vol = m.group(2)
+                pg = m.group(3)
+                if not btype or btype.upper() in ["BOOK", "VOL", "VOLUME", "RECORD", "."]:
+                    btype = self.find_book_type_for_vol_pg(vol, pg)
+                    if btype == "DR": btype = "MR"
+                else:
+                    btype = btype.upper()
+                return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
+
+            rel_pattern = r'(?:Releases?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            txt = re.sub(rel_pattern, repl_rel, txt, flags=re.IGNORECASE)
+
         # ARTI
         if "ARTI\n" not in txt:
             arti_pattern = re.compile(r'(?i)(?:[^.]*?\bconvey(?:s|ed)?\b\s+)?[^.]*?all,?\s+(?:of\s+)?(?:its\s+|his\s+|her\s+|their\s+)?rights?,?\s*title,?\s*(?:and|&)\s*interest[^.]*(?:\.|$)' )
@@ -2898,26 +2914,27 @@ class RunsheetEditorWindow(tk.Toplevel):
                 vol = m.group(2)
                 pg = m.group(3)
                 book = book.strip().upper()
-                if not book:
-                    book = 'OR'
+                if not book or book in ["BOOK", "VOL", "VOLUME", "RECORD", "."]:
+                    book = self.find_book_type_for_vol_pg(vol, pg)
+                    if book == "DR": book = "MR"
                 
-                if "release" in inst_type or "satisfaction" in inst_type:
-                    return f'Releases mortgage recorded in {book} {vol}/{pg}'
+                if "release" in inst_type or "satisfaction" in inst_type or "releases mortgage" in txt.lower():
+                    return f'Releases mortgage recorded in {book} {vol}/{pg}\nFull satisfaction. Clears lien from the property title.'
                 else:
                     return f'Release: {book} {vol}/{pg}'
                     
-            txt = re.sub(r'Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?(?:VOL(?:UME)?\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s]*(?:PAGE\s*|PG\s*)?(\d+)', format_released, txt, flags=re.IGNORECASE)
+            rel_pattern = r'(?:Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            txt = re.sub(rel_pattern, format_released, txt, flags=re.IGNORECASE)
             txt = re.sub(r'([^\n\u200B])\s*(Releases mortgage recorded in)', r'\1\n\2', txt)
-            txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
-            txt = re.sub(r'(Releases mortgage recorded in\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             txt = re.sub(r'([^\n\u200B])\s*(Release:)', r'\1\n\2', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
             # Prior Ref normalization in comments
             def repl_prior_ref_match(m):
-                return self.normalize_prior_ref_string(m.group(0))
+                return "\n" + self.normalize_prior_ref_string(m.group(0))
             txt = re.sub(r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*[^\n\.;]+', repl_prior_ref_match, txt, flags=re.IGNORECASE)
+            txt = re.sub(r'\n{3,}', '\n\n', txt)
 
             if "\u200B" not in txt:
                 txt = "\u200B" + txt
