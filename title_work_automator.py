@@ -3613,15 +3613,16 @@ end tell'''
             from playwright.sync_api import sync_playwright
             from datetime import datetime
             from dateutil.relativedelta import relativedelta
+            import re
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                # Don't erase the entire file history!
                 file_exists = os.path.exists(out_file)
                 with open(out_file, "a") as f:
                     if not file_exists:
                         f.write("KOFILE NAME SEARCH RESULTS\n")
                         f.write("="*80 + "\n\n")
+                        
                 for owner in reversed(search_params):
                     context = browser.new_context()
                     page = context.new_page()
@@ -3630,15 +3631,24 @@ end tell'''
                     
                     self.log("Logging in as guest...")
                     page.locator("input[value='Login as Guest']").click(no_wait_after=True)
-                    page.wait_for_timeout(3000)
+                    page.wait_for_load_state('domcontentloaded')
+                    page.wait_for_timeout(2000)
                     
                     self.log("Accepting disclaimer if present...")
                     try:
                         page.frame_locator("iframe[name='bodyframe']").locator("input#accept").click(timeout=5000)
-                        page.wait_for_timeout(3000)
+                        page.wait_for_load_state('domcontentloaded')
+                        page.wait_for_timeout(2000)
                     except: pass
 
-                    name = owner.get("name", "")
+                    name = owner.get("name", "").strip()
+                    if not name:
+                        first = owner.get("first_name", "").strip()
+                        last = owner.get("last_name", "").strip()
+                        if last and first:
+                            name = f"{last} {first}"
+                        elif last:
+                            name = last
                     if not name: continue
                     
                     acq_str = owner.get("acquisition_date")
@@ -3667,13 +3677,12 @@ end tell'''
                                 to_date_str = dt.strftime("%m/%d/%Y")
                     except: pass
                     
-                    self.log(f"Searching Kofile for: {name} ({from_date_str} to {to_date_str})")
+                    self.log(f"Searching Kofile for: {name} ({from_date_str or 'All'} to {to_date_str or 'Present'})")
                     
                     # Navigate to Name search screen
                     try:
-                        page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first.click(timeout=3000)
-                    except:
-                        pass
+                        page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first.click(timeout=4000)
+                    except: pass
                     page.wait_for_timeout(2000)
                     
                     page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Name").click()
@@ -3688,141 +3697,128 @@ end tell'''
                     
                     criteria_frame.get_by_label("Name", exact=True).fill(name)
                     if from_date_str:
-                        criteria_frame.locator("input[aria-label='Recorded Date From'].textbox-text").fill(from_date_str)
-                    else:
-                        criteria_frame.locator("input[aria-label='Recorded Date From'].textbox-text").fill("")
+                        try:
+                            criteria_frame.locator("input[aria-label='Recorded Date From'].textbox-text, input[name*='From']").first.fill(from_date_str)
+                        except: pass
                     if to_date_str:
-                        criteria_frame.locator("input[aria-label='Recorded Date To'].textbox-text").fill(to_date_str)
-                    else:
-                        criteria_frame.locator("input[aria-label='Recorded Date To'].textbox-text").fill("")
+                        try:
+                            criteria_frame.locator("input[aria-label='Recorded Date To'].textbox-text, input[name*='To']").first.fill(to_date_str)
+                        except: pass
                         
                     self.log("Clicking Search...")
                     page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").locator("img#imgSearch").click()
 
                     # Wait for results
-                    page.wait_for_timeout(3000)
+                    page.wait_for_timeout(3500)
 
                     self.log(f"Extracting results for {name}...")
                     
-                    page_num = 1
                     all_parsed_rows = []
                     seen = set()
                     
-                    while True:
+                    try:
                         reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
+                        reslist.locator("body").wait_for(state="visible", timeout=15000)
                         
-                        try:
-                            reslist.locator("tr").first.wait_for(state="visible", timeout=15000)
-                            
-                            table_data_json = reslist.locator("body").evaluate("""
-                                () => {
-                                    let rows = document.querySelectorAll('table tr');
-                                    let result = [];
-                                    for (let row of rows) {
-                                        let cols = row.querySelectorAll('th, td');
-                                        let rowData = [];
-                                        for (let col of cols) {
-                                            let text = col.innerText.trim();
-                                            rowData.push(text.replace(/\n/g, ' '));
-                                        }
-                                        if (rowData.length > 2) {
-                                            result.push(rowData);
-                                        }
+                        table_data_json = reslist.locator("body").evaluate("""
+                            () => {
+                                let rows = Array.from(document.querySelectorAll('table tr'));
+                                let res = [];
+                                for (let r of rows) {
+                                    let cells = Array.from(r.querySelectorAll('th, td'));
+                                    let rowVals = cells.map(c => c.innerText.split('\\n').join(' ').trim());
+                                    if (rowVals.length >= 6) {
+                                        res.push(rowVals);
                                     }
-                                    return result;
                                 }
-                            """)
+                                return res;
+                            }
+                        """)
+                        
+                        for row in table_data_json:
+                            # Skip table headers
+                            if any("Instrument" in c or "Document Type" in c for c in row):
+                                continue
+                                
+                            # Locate the date column (matches MM/DD/YYYY)
+                            date_idx = -1
+                            for i, val in enumerate(row):
+                                if re.match(r"^\d{2}/\d{2}/\d{4}$", val.strip()):
+                                    date_idx = i
+                                    break
+                                    
+                            if date_idx == -1:
+                                continue
+                                
+                            inst = row[date_idx - 3].strip() if date_idx >= 3 else ""
+                            vol = row[date_idx - 2].strip() if date_idx >= 2 else ""
+                            pg = row[date_idx - 1].strip() if date_idx >= 1 else ""
+                            date = row[date_idx].strip()
+                            dtype = row[date_idx + 1].strip() if len(row) > date_idx + 1 else ""
                             
-                            for idx, row in enumerate(table_data_json):
-                                if len(row) < 12: continue
-                                if "Instrument" in row[2]: continue # Skip header
-                                
-                                inst = row[2].strip()
-                                vol = row[3].strip()
-                                pg = row[4].strip()
-                                volpg = f"{vol}/{pg}" if vol and pg else vol or pg
-                                date = row[5].strip()
-                                try:
-                                    if len(date) > 20:
-                                        parts = date.split()
-                                        if len(parts) >= 4 and parts[0] in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
-                                            short_date = " ".join(parts[:4])
-                                            import datetime
-                                            dt = datetime.datetime.strptime(short_date, "%a %b %d %Y")
-                                            date = dt.strftime("%m/%d/%Y")
-                                except Exception:
-                                    pass
-                                dtype = row[6].strip()
-                                
-                                name_type = row[7].strip()
-                                name_val = row[8].strip()
-                                other_name_type = row[9].strip()
-                                other_name_val = row[10].strip()
-                                
-                                grantor = ""
-                                grantee = ""
-                                
-                                if name_type == "R": grantor = name_val
-                                elif name_type in ("E", "D"): grantee = name_val
-                                    
-                                if other_name_type == "R": grantor = other_name_val if not grantor else f"{grantor} & {other_name_val}"
-                                elif other_name_type in ("E", "D"): grantee = other_name_val if not grantee else f"{grantee} & {other_name_val}"
-                                    
-                                legal = row[11].strip() if len(row) > 11 else ""
-                                key = f"{inst}_{volpg}_{date}_{dtype}"
-                                if key in seen: continue
+                            name_role = row[date_idx + 2].strip() if len(row) > date_idx + 2 else ""
+                            name_val = row[date_idx + 3].strip() if len(row) > date_idx + 3 else ""
+                            
+                            other_role = row[date_idx + 4].strip() if len(row) > date_idx + 4 else ""
+                            other_name = row[date_idx + 5].strip() if len(row) > date_idx + 5 else ""
+                            
+                            legal = row[date_idx + 6].strip() if len(row) > date_idx + 6 else ""
+                            
+                            grantor = ""
+                            grantee = ""
+                            if name_role == "R": grantor = name_val
+                            elif name_role in ("E", "D"): grantee = name_val
+                            
+                            if other_role == "R": grantor = other_name if not grantor else f"{grantor} & {other_name}"
+                            elif other_role in ("E", "D"): grantee = other_name if not grantee else f"{grantee} & {other_name}"
+                            
+                            volpg = f"{vol}/{pg}" if vol and pg else vol or pg
+                            key = (inst, volpg, date, dtype, grantor, grantee)
+                            if key not in seen:
                                 seen.add(key)
-                                
                                 all_parsed_rows.append((inst, dtype, volpg, date, grantor, grantee, legal))
                                 
-                        except Exception as e:
-                            self.log(f"Error extracting results for {name} on page {page_num}: {str(e)}")
-                            break
-                            
-                        # Check for pagination in subnav
-                        subnav = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='subnav']")
+                    except Exception as e:
+                        self.log(f"Extraction for {name}: {str(e)}")
                         
-                        has_next = False
-                        try:
-                            # Use evaluate to find the Next button and click it to avoid Playwright strict mode issues or visibility bugs
-                            has_next = subnav.locator("body").evaluate("""
-                                () => {
-                                    let links = Array.from(document.querySelectorAll('a, img, input'));
-                                    let nextEl = links.find(el => (el.innerText && el.innerText.trim() === 'Next') || (el.alt && el.alt === 'Next') || (el.title && el.title === 'Next') || (el.value && el.value === 'Next'));
-                                    if (nextEl) {
-                                        nextEl.click();
-                                        return true;
-                                    }
-                                    return false;
-                                }
-                            """)
-                        except Exception as e:
-                            self.log(f"Pagination check failed: {e}")
-                            
-                        if has_next:
-                            self.log(f"Clicking Next page for {name} (now loading page {page_num + 1})...")
-                            page.wait_for_timeout(3000)
-                            page_num += 1
-                        else:
-                            break
-                            
                     try:
-                        # Dump all scraped records to the text file
                         with open(out_file, "a") as f:
-                            f.write(f"--- Results for: {name} ({from_date_str} to {to_date_str}) ---\n")
+                            f.write(f"--- Results for: {name} ({from_date_str or 'All'} to {to_date_str or 'Present'}) ---\n")
                             if all_parsed_rows:
-                                f.write(f"Found {len(all_parsed_rows)} documents across {page_num} page(s):\n")
+                                f.write(f"Found {len(all_parsed_rows)} documents:\n")
                                 for r in all_parsed_rows:
                                     f.write(f"  [{r[1]}] Vol/Pg: {r[2]} | Date: {r[3]} | Grantor: {r[4]} | Grantee: {r[5]} | Legal: {r[6]}\n")
                             else:
                                 f.write("  No documents found.\n")
+                            f.write("\n")
+                        self.log(f"Saved {len(all_parsed_rows)} document records for {name} to {os.path.basename(out_file)}.")
                     except Exception as e:
                         self.log(f"Error writing results for {name}: {str(e)}")
-                        import traceback
-                        traceback.print_exc()
-
-
-
+                        
+                    context.close()
+                    
+                browser.close()
+                
+            self.log("Kofile Name Search completed successfully.")
+            
+            # Refresh Document Viewer folders so DOCS / text file shows up
+            if hasattr(self, 'root'):
+                def refresh_ui():
+                    self.update_viewer_folders()
+                    self.viewer_folder_combo.set("DOCS")
+                    self.refresh_viewer_list()
+                    # Open results file so user sees it
+                    try:
+                        import subprocess, sys
+                        if sys.platform == "darwin":
+                            subprocess.Popen(["open", out_file])
+                        elif sys.platform == "win32":
+                            os.startfile(out_file)
+                        else:
+                            subprocess.Popen(["xdg-open", out_file])
+                    except: pass
+                self.root.after(0, refresh_ui)
+                
         except Exception as e:
             self.log(f"Kofile name search failed: {e}")
 
