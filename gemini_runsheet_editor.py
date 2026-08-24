@@ -21,14 +21,20 @@ class GeminiRunsheetEditorWindow(runsheet_editor.RunsheetEditorWindow):
                     self.provenance_data = json.load(f)
             except Exception: pass
 
-        # Add Gemini specific buttons to bottom_bar
-        if hasattr(self, 'phrase_btn') and self.phrase_btn.master:
-            bar = self.phrase_btn.master
+        # Add Gemini specific buttons to action_bar_row1
+        if hasattr(self, 'action_bar_row1'):
+            bar = self.action_bar_row1
             self.gemini_draft_btn = ttk.Button(bar, text="✨ Draft with Gemini (Cmd+G)", command=self.draft_current_row_with_gemini)
-            self.gemini_draft_btn.pack(side=tk.LEFT, padx=(10, 0))
+            self.gemini_draft_btn.pack(side=tk.LEFT, before=self.reformat_btn, padx=(0, 6))
             
             self.gemini_batch_btn = ttk.Button(bar, text="🚀 Batch AI All Rows", command=self.run_batch_gemini_generation)
-            self.gemini_batch_btn.pack(side=tk.LEFT, padx=(5, 0))
+            self.gemini_batch_btn.pack(side=tk.LEFT, before=self.reformat_btn, padx=(0, 6))
+        elif hasattr(self, 'phrase_btn') and self.phrase_btn.master:
+            bar = self.phrase_btn.master
+            self.gemini_draft_btn = ttk.Button(bar, text="✨ Draft with Gemini (Cmd+G)", command=self.draft_current_row_with_gemini)
+            self.gemini_draft_btn.pack(side=tk.LEFT, padx=(6, 0))
+            self.gemini_batch_btn = ttk.Button(bar, text="🚀 Batch AI All Rows", command=self.run_batch_gemini_generation)
+            self.gemini_batch_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         # Bind Cmd+G and Ctrl+G
         self.bind("<Command-g>", lambda e: self.draft_current_row_with_gemini())

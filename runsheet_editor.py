@@ -189,29 +189,34 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.status_combo.bind("<<ComboboxSelected>>", self.on_status_change)
         ttk.Label(top_bar, text="Row Status:").pack(side=tk.RIGHT)
         
-        bottom_bar = ttk.Frame(header_area)
-        bottom_bar.pack(fill=tk.X, pady=(5, 0))
+        # Action Toolbar Row 1 (AI Actions, Sync, Reformat, Shortcuts)
+        self.action_bar_row1 = ttk.Frame(header_area)
+        self.action_bar_row1.pack(fill=tk.X, pady=(4, 2))
         
-        self.phrase_btn = ttk.Button(bottom_bar, text="Phrase Library", command=self.open_phrase_library)
-        self.phrase_btn.pack(side=tk.LEFT)
+        self.reformat_btn = ttk.Button(self.action_bar_row1, text="Reformat Comments", command=self.confirm_and_reformat_all)
+        self.reformat_btn.pack(side=tk.LEFT)
         
-        self.open_pdf_btn = ttk.Button(bottom_bar, text="Open Document", command=self.open_pdf_for_row, state="disabled")
-        self.open_pdf_btn.pack(side=tk.LEFT, padx=10)
+        self.sync_or_btn = ttk.Button(self.action_bar_row1, text="📊 Sync OR", command=self.open_or_sync_dialog)
+        self.sync_or_btn.pack(side=tk.LEFT, padx=(6, 0))
         
-        self.retry_qc_btn = ttk.Button(bottom_bar, text="Retry AI Check", command=self.retry_ai_check, state="disabled")
-        self.retry_qc_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self.retry_qc_btn = ttk.Button(self.action_bar_row1, text="Retry AI Check", command=self.retry_ai_check, state="disabled")
+        self.retry_qc_btn.pack(side=tk.LEFT, padx=(6, 0))
         
-        self.open_excel_btn = ttk.Button(bottom_bar, text="Open RS Excel", command=self.open_excel_runsheet)
-        self.open_excel_btn.pack(side=tk.LEFT)
-        
-        self.reformat_btn = ttk.Button(bottom_bar, text="Reformat Comments", command=self.confirm_and_reformat_all)
-        self.reformat_btn.pack(side=tk.LEFT, padx=(10, 0))
-        
-        self.sync_or_btn = ttk.Button(bottom_bar, text="📊 Sync OR", command=self.open_or_sync_dialog)
-        self.sync_or_btn.pack(side=tk.LEFT, padx=(10, 0))
-        
-        self.shortcuts_btn = ttk.Button(bottom_bar, text="⌨️ Shortcuts", command=self.show_shortcuts_dialog)
+        self.shortcuts_btn = ttk.Button(self.action_bar_row1, text="⌨️ Shortcuts", command=self.show_shortcuts_dialog)
         self.shortcuts_btn.pack(side=tk.RIGHT)
+        
+        # Action Toolbar Row 2 (Documents, Phrase Library, RS Excel)
+        self.action_bar_row2 = ttk.Frame(header_area)
+        self.action_bar_row2.pack(fill=tk.X, pady=(2, 4))
+        
+        self.open_pdf_btn = ttk.Button(self.action_bar_row2, text="Open Document", command=self.open_pdf_for_row, state="disabled")
+        self.open_pdf_btn.pack(side=tk.LEFT)
+        
+        self.phrase_btn = ttk.Button(self.action_bar_row2, text="Phrase Library", command=self.open_phrase_library)
+        self.phrase_btn.pack(side=tk.LEFT, padx=(6, 0))
+        
+        self.open_excel_btn = ttk.Button(self.action_bar_row2, text="Open RS Excel", command=self.open_excel_runsheet)
+        self.open_excel_btn.pack(side=tk.LEFT, padx=(6, 0))
         
         self.canvas = tk.Canvas(right_container)
         v_scroll = ttk.Scrollbar(right_container, orient="vertical", command=self.canvas.yview)
