@@ -4434,14 +4434,16 @@ end tell'''
         popup.bind("<Return>", lambda e: popup.destroy())
 
     def open_belmont_recorder(self, event=None):
-        recorder_url = "https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH"
-        import webbrowser
+        import subprocess, sys
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "launch_kofile.py")
         try:
-            webbrowser.open_new_tab(recorder_url)
-            self.log("🏛️ Opened Belmont County Recorder (Kofile) in browser.")
+            subprocess.Popen([sys.executable, script_path])
+            self.log("🏛️ Launching Belmont County Recorder and navigating directly to Search Public Records...")
         except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Could not open Recorder website:\n{e}")
+            import webbrowser
+            recorder_url = "https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH"
+            webbrowser.open_new_tab(recorder_url)
+            self.log(f"🏛️ Opened Belmont County Recorder in browser fallback: {e}")
         return "break"
 
     def open_belmont_gis(self, event=None):
