@@ -278,10 +278,22 @@ class RunsheetEditorWindow(tk.Toplevel):
             self.bind_all(seq, handler)
             self.listbox.bind(seq, handler)
         
-        # Number shortcuts for inserting phrases (Ctrl+1 .. Ctrl+9, Ctrl+0)
+        # Number shortcuts for inserting phrases 1..10 (Ctrl+1 .. Ctrl+9, Ctrl+0)
         for num in range(10):
             self.bind(f"<Control-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n))
             self.bind(f"<Command-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n))
+            
+        # Shift+Number & Alt+Number shortcuts for inserting phrases 11..20 (Ctrl+Shift+1..0 / Option+1..0)
+        shift_keys = {"exclam": 1, "at": 2, "numbersign": 3, "dollar": 4, "percent": 5, "asciicircum": 6, "ampersand": 7, "asterisk": 8, "parenleft": 9, "parenright": 0}
+        for sym, num in shift_keys.items():
+            self.bind(f"<Control-{sym}>", lambda e, n=num: self.insert_phrase_by_num(n + 10))
+            self.bind(f"<Command-{sym}>", lambda e, n=num: self.insert_phrase_by_num(n + 10))
+            self.bind(f"<Control-Shift-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n + 10))
+            self.bind(f"<Command-Shift-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n + 10))
+
+        for num in range(10):
+            self.bind(f"<Alt-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n + 10))
+            self.bind(f"<Option-Key-{num}>", lambda e, n=num: self.insert_phrase_by_num(n + 10))
         
         self.row_indices = []
         self.load_rows()
@@ -3108,7 +3120,12 @@ class RunsheetEditorWindow(tk.Toplevel):
                     phrases = json.load(f)
             except: pass
 
-        idx = 9 if num == 0 else num - 1
+        if num == 0:
+            idx = 9
+        elif num == 20 or num == 10:
+            idx = 19
+        else:
+            idx = num - 1
         if 0 <= idx < len(phrases):
             phrase = phrases[idx]
             widget = self.focus_get()
@@ -3270,8 +3287,10 @@ class RunsheetEditorWindow(tk.Toplevel):
             ("Cmd+Shift+D", "Delete '--- Original ---' notes block"),
             ("Ctrl + O / Cmd + O", "Open Document (PDF for current row)"),
             ("Ctrl + N / Cmd + N", "Convert selection or field to Title Case"),
-            ("Ctrl + L / Cmd + L", "Open Phrase Library window"),
+            ("Ctrl + L / Cmd + L", "Open Phrase Library (Type number or search + Enter)"),
             ("Ctrl + 1 .. 9, 0", "Insert Phrase #1 through #10 at cursor"),
+            ("Cmd/Ctrl + Shift + 1..0", "Insert Phrase #11 through #20 at cursor"),
+            ("Option / Alt + 1..0", "Insert Phrase #11 through #20 at cursor"),
             ("Ctrl + ↑ / Ctrl + ↓", "Save & jump to Previous / Next Row"),
             ("Alt + ↑ / Alt + ↓", "Save & jump to Previous / Next Row"),
             ("↑ / ↓ (in listbox)", "Quick select & load row into editor"),
@@ -3326,22 +3345,36 @@ class RunsheetEditorWindow(tk.Toplevel):
                 phrases = default_phrases[:]
                 
         popup = tk.Toplevel(self)
-        popup.title("Phrase Library")
-        popup.geometry("450x450")
+        popup.title("Phrase Library (Type number or search, press Enter)")
+        popup.geometry("480x520")
         popup.attributes("-topmost", True)
         
-        list_frame = ttk.Frame(popup)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Search / Number Jump bar
+        search_frame = ttk.Frame(popup)
+        search_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(search_frame, text="🔍 Jump to # / Filter:").pack(side=tk.LEFT)
+        search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=search_var, font=("Helvetica", 14))
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
-        listbox = tk.Listbox(list_frame, font=("Helvetica", 16), exportselection=False)
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        listbox = tk.Listbox(list_frame, font=("Helvetica", 15), exportselection=False)
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         listbox.config(yscrollcommand=scrollbar.set)
         
-        def refresh_list():
+        filtered_indices = list(range(len(phrases)))
+        
+        def refresh_list(*args):
+            nonlocal filtered_indices
+            query = search_var.get().strip().lower()
             listbox.delete(0, tk.END)
+            filtered_indices = []
+            
             for idx, p in enumerate(phrases):
                 display_p = p.replace("\n", " ↵ ")
                 if idx < 9:
@@ -3350,28 +3383,53 @@ class RunsheetEditorWindow(tk.Toplevel):
                     num_prefix = "[0] "
                 else:
                     num_prefix = f"[{idx + 1}] "
-                listbox.insert(tk.END, f"{num_prefix}{display_p}")
                 
+                full_item_str = f"{num_prefix}{display_p}"
+                
+                # Check match against query or exact index
+                if not query:
+                    listbox.insert(tk.END, full_item_str)
+                    filtered_indices.append(idx)
+                elif query.isdigit():
+                    target_num = int(query)
+                    if (target_num == 0 and idx == 9) or (target_num == idx + 1) or query in str(idx + 1):
+                        listbox.insert(tk.END, full_item_str)
+                        filtered_indices.append(idx)
+                elif query in full_item_str.lower():
+                    listbox.insert(tk.END, full_item_str)
+                    filtered_indices.append(idx)
+                    
+            if listbox.size() > 0:
+                listbox.selection_clear(0, tk.END)
+                listbox.selection_set(0)
+                listbox.activate(0)
+
+        search_var.trace_add("write", refresh_list)
         refresh_list()
+        search_entry.focus_set()
         
         btn_frame = ttk.Frame(popup)
         btn_frame.pack(fill=tk.X, padx=10, pady=5)
         
         def insert_at_cursor(event=None):
             selection = listbox.curselection()
+            if not selection and listbox.size() > 0:
+                selection = (0,)
             if not selection:
                 return
-            phrase = phrases[selection[0]]
+            orig_idx = filtered_indices[selection[0]]
+            phrase = phrases[orig_idx]
             
-            # Find what had focus in the main window
             focus_widget = self.focus_lastfor()
             
             if isinstance(focus_widget, tk.Text):
                 try:
                     focus_widget.insert(tk.INSERT, phrase)
+                    self.perform_spellcheck(focus_widget)
+                    self.highlight_links(focus_widget)
                 except tk.TclError:
                     pass
-            elif isinstance(focus_widget, ttk.Entry) or isinstance(focus_widget, tk.Entry):
+            elif isinstance(focus_widget, (ttk.Entry, tk.Entry)):
                 try:
                     focus_widget.insert(tk.INSERT, phrase)
                 except tk.TclError:
@@ -3380,24 +3438,41 @@ class RunsheetEditorWindow(tk.Toplevel):
                 popup.clipboard_clear()
                 popup.clipboard_append(phrase)
                 
+            popup.destroy()
+            return "break"
+                
         def copy_to_clipboard():
             selection = listbox.curselection()
+            if not selection and listbox.size() > 0:
+                selection = (0,)
             if not selection:
                 return
-            phrase = phrases[selection[0]]
+            orig_idx = filtered_indices[selection[0]]
+            phrase = phrases[orig_idx]
             popup.clipboard_clear()
             popup.clipboard_append(phrase)
             
-        ttk.Button(btn_frame, text="Insert at Cursor", command=insert_at_cursor).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        ttk.Button(btn_frame, text="Insert at Cursor (Enter)", command=insert_at_cursor).pack(side=tk.LEFT, expand=True, fill=tk.X)
         ttk.Button(btn_frame, text="Copy to Clipboard", command=copy_to_clipboard).pack(side=tk.LEFT, expand=True, fill=tk.X)
         
+        # Keybindings inside Phrase Library popup
+        search_entry.bind("<Return>", insert_at_cursor)
         listbox.bind("<Return>", insert_at_cursor)
         listbox.bind("<Double-Button-1>", insert_at_cursor)
+        popup.bind("<Escape>", lambda e: popup.destroy())
+        
+        def on_down_from_search(event):
+            listbox.focus_set()
+            if listbox.size() > 0 and not listbox.curselection():
+                listbox.selection_set(0)
+            return "break"
+            
+        search_entry.bind("<Down>", on_down_from_search)
         
         add_frame = ttk.Frame(popup)
         add_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        new_entry = tk.Text(add_frame, font=("Helvetica", 14), height=4, wrap=tk.WORD, undo=True, maxundo=-1, autoseparators=True)
+        new_entry = tk.Text(add_frame, font=("Helvetica", 14), height=3, wrap=tk.WORD, undo=True, maxundo=-1, autoseparators=True)
         new_entry.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         def add_phrase():
@@ -3415,8 +3490,8 @@ class RunsheetEditorWindow(tk.Toplevel):
             selection = listbox.curselection()
             if not selection:
                 return
-            idx = selection[0]
-            del phrases[idx]
+            orig_idx = filtered_indices[selection[0]]
+            del phrases[orig_idx]
             with open(phrases_file, "w") as f:
                 json.dump(phrases, f, indent=4)
             refresh_list()
