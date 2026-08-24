@@ -1884,7 +1884,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         patterns = [
             r'\b(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|Book|Record)\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
             r'\bVol(?:ume|\.)?\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
-            r'(?<!\d)(\d{1,4})\s*[-/]\s*(\d{1,4})(?!\d)'
+            r'(?<![\d/])(\d{1,4})\s*[-/]\s*(\d{1,4})(?![\d/])'
         ]
         seen_spans = []
         for pat in patterns:
@@ -2963,7 +2963,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                     btype = btype.upper()
                 return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
 
-            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:(?:\.|\n|[^\S\r\n])*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)*'
+            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?[^\S\r\n]*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
             txt = re.sub(rel_pattern, repl_rel, txt, flags=re.IGNORECASE)
             
             clean_lines = []
@@ -3133,7 +3133,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                 else:
                     return f'Release: {book} {vol}/{pg}'
                     
-            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:(?:\.|\n|[^\S\r\n])*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)*'
+            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?[^\S\r\n]*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
             txt = re.sub(rel_pattern, format_released, txt, flags=re.IGNORECASE)
             
             # Deduplicate consecutive identical lines (e.g. repeated Full satisfaction statements)
@@ -3146,7 +3146,8 @@ class RunsheetEditorWindow(tk.Toplevel):
 
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Releases mortgage recorded in)', r'\1\n\2', txt)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Release:)', r'\1\n\2', txt)
-            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(No dower mentioned\.)', r'\1\n\2', txt)
+            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*((?:No\s+dower\s+mentioned|Dower\s+(?:rights\s+)?released|Dower\s+not\s+stated)\.?)', r'\1\n\2', txt, flags=re.IGNORECASE)
+            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Prior Ref:)', r'\1\n\2', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
             # Prior Ref normalization in comments

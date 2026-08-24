@@ -3431,7 +3431,7 @@ end tell'''
             patterns = [
                 r'\b(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|Book|Record)\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
                 r'\bVol(?:ume|\.)?\s*(\d{1,4})\s*[-/,\s]+(?:(?:Page|Pg|p)\.?\s*)?(\d{1,4})\b',
-                r'(?<!\d)(\d{1,4})\s*[-/]\s*(\d{1,4})(?!\d)'
+                r'(?<![\d/])(\d{1,4})\s*[-/]\s*(\d{1,4})(?![\d/])'
             ]
             seen_spans = []
             for pat in patterns:
