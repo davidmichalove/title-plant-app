@@ -357,7 +357,7 @@ class AutomatorApp:
         
 
         
-        self.next_page_btn = ttk.Button(vol_pg_frame, text="Next Page >", command=self.fetch_next_page, state=tk.DISABLED)
+        self.next_page_btn = ttk.Button(vol_pg_frame, text="Next Page >", command=self.fetch_next_page, state=tk.NORMAL)
         self.next_page_btn.grid(row=0, column=6, padx=2)
         
         viewer_frame = ttk.LabelFrame(tab_main, text="Document Viewer & Docket", padding=5)
@@ -2300,20 +2300,78 @@ class AutomatorApp:
             return False
             
     def fetch_next_page(self):
-        if not getattr(self, 'last_deed_download', None): return
-        pg_int = self.last_deed_download.get('pg_int')
-        if pg_int is None:
-            self.log("Cannot determine next page number automatically.")
+        parcel = self.parcel_entry.get().strip()
+        vol = ""
+        pg_int = None
+        doc_type = "Deed"
+
+        # 1. Check entry boxes first
+        entry_vol = self.vol_entry.get().strip()
+        entry_pg = self.pg_entry.get().strip()
+        if entry_vol and entry_pg:
+            vol = entry_vol
+            try:
+                pg_int = int(float(entry_pg))
+            except:
+                pass
+            if hasattr(self, 'doc_type_combo'):
+                doc_type = self.doc_type_combo.get()
+
+        # 2. Check last_deed_download metadata
+        if (not vol or pg_int is None) and getattr(self, 'last_deed_download', None):
+            parcel = parcel or self.last_deed_download.get('parcel_num')
+            vol = self.last_deed_download.get('vol')
+            pg_int = self.last_deed_download.get('pg_int')
+            doc_type = self.last_deed_download.get('doc_type', doc_type)
+
+        # 3. Check selected item in Document Viewer
+        if (not vol or pg_int is None):
+            try:
+                selected = self.viewer_listbox.curselection()
+                if selected:
+                    fname = self.viewer_listbox.get(selected[0])
+                    m = re.search(r'(\d+)[-_](\d+)', fname)
+                    if m:
+                        vol = m.group(1)
+                        pg_int = int(m.group(2))
+            except:
+                pass
+
+        if not parcel:
+            self.log("Cannot fetch next page: Please enter a Parcel Number.")
             return
-            
+
+        if not vol or pg_int is None:
+            self.log("Cannot determine current Volume and Page for Next Page. Please enter Volume and Page in the fields above.")
+            return
+
         next_pg = pg_int + 1
-        parcel = self.last_deed_download['parcel_num']
-        vol = self.last_deed_download['vol']
         
-        doc_type = self.last_deed_download.get('doc_type', 'Deed')
+        # Advance the page entry box in the UI
+        self.vol_entry.delete(0, tk.END)
+        self.vol_entry.insert(0, str(vol))
+        self.pg_entry.delete(0, tk.END)
+        self.pg_entry.insert(0, str(next_pg))
+
+        self.last_deed_download = {
+            'parcel_num': parcel,
+            'vol': str(vol),
+            'pg': str(next_pg),
+            'pg_int': next_pg,
+            'doc_type': doc_type
+        }
+
         self.log(f"Fetching next page ({next_pg}) for Vol {vol} ({doc_type})...")
+        
+        def do_fetch():
+            res = self.copy_local_deed(parcel, vol, next_pg, True, doc_type)
+            # If not found locally, try scraping from website as fallback
+            if not res:
+                self.log(f"Next page {vol}-{next_pg} not found in local archives. Attempting website fetch...")
+                self._fetch_kofile_deed_background(vol, next_pg, parcel, doc_type)
+
         import threading
-        threading.Thread(target=self.copy_local_deed, args=(parcel, vol, next_pg, True, doc_type), daemon=True).start()
+        threading.Thread(target=do_fetch, daemon=True).start()
 
 
 
