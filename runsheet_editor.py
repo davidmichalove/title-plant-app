@@ -2941,12 +2941,12 @@ class RunsheetEditorWindow(tk.Toplevel):
             sentence = re.sub(r'(?i)\breserving\b', 'RESERVING', sentence)
             if "[[BOLD_START]]" not in sentence:
                 sentence = f"[[BOLD_START]]{sentence}[[BOLD_END]]"
-            return f"\n\n{sentence}\n\n"
+            return f"\n{sentence}\n"
         txt = re.sub(r'(?i)[^.\n]*\breserving\b[^.\n]*oil\s+and\s+gas[^.\n]*(?:\.|$)', format_reserving_oag, txt)
 
         def format_own_line(m):
             s = m.group(1).strip()
-            return f"\n\n{s}\n\n"
+            return f"\n{s}\n"
         txt = re.sub(r'(?:^|(?<=\.))\s*((?:EXCEPTING|EXCEPTIONS?|RESERVES?|RESERVATIONS?|RESERVING)\b[^.\n]*(?:\.|$))', format_own_line, txt, flags=re.IGNORECASE)
 
         # RELEASES / SATISFACTIONS
@@ -3028,17 +3028,15 @@ class RunsheetEditorWindow(tk.Toplevel):
                     arti_part = arti_lines[0] + '\n' + arti_lines[1]
                     rest = '\n'.join(arti_lines[2:]).strip()
                 
-                    final_parts = [arti_part, ""]
+                    final_parts = [arti_part]
                     if amount_str: final_parts.append(amount_str)
                     if maturity_str: final_parts.append(maturity_str)
-                    if amount_str or maturity_str: final_parts.append("")
                     if rest: final_parts.append(rest)
                     txt = '\n'.join(final_parts).strip()
                 else:
                     final_parts = []
                     if amount_str: final_parts.append(amount_str)
                     if maturity_str: final_parts.append(maturity_str)
-                    if amount_str or maturity_str: final_parts.append("")
                     if txt: final_parts.append(txt)
                     txt = '\n'.join(final_parts).strip()
 
@@ -3155,7 +3153,20 @@ class RunsheetEditorWindow(tk.Toplevel):
                 return self.normalize_prior_ref_string(m.group(0).strip())
             txt = re.sub(r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*[^\n\.;]+', repl_prior_ref_match, txt, flags=re.IGNORECASE)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Prior Ref:)', r'\1\n\2', txt)
-            txt = re.sub(r'\n{3,}', '\n\n', txt)
+            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
+
+            # Separate main comment text from Original/Gemini Draft notes blocks
+            parts = re.split(r'(\n*---\s*(?:Original|Gemini Draft)\s*---.*)', txt, flags=re.DOTALL)
+            main_text = parts[0]
+            extra_text = "".join(parts[1:]) if len(parts) > 1 else ""
+
+            # Ensure all lines in the main comment block have NO blank lines (single \n everywhere)
+            main_text = re.sub(r'\n{2,}', '\n', main_text).strip()
+
+            if extra_text:
+                txt = f"{main_text}\n\n{extra_text.strip()}"
+            else:
+                txt = main_text
 
             if "\u200B" not in txt:
                 txt = "\u200B" + txt
