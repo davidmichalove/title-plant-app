@@ -2631,6 +2631,94 @@ class RunsheetEditorWindow(tk.Toplevel):
                     parts.append(token)
         return parts
 
+    def find_book_type_for_vol_pg(self, vol, pg):
+        import glob
+        vol = str(vol).strip()
+        pg = str(pg).strip()
+        
+        search_dirs = []
+        if hasattr(self, 'excel_path') and self.excel_path:
+            pdir = os.path.dirname(self.excel_path)
+            search_dirs.extend([pdir, os.path.join(pdir, "DOCS"), os.path.dirname(pdir), os.path.join(os.path.dirname(pdir), "DOCS")])
+            
+        for sdir in search_dirs:
+            if sdir and os.path.exists(sdir):
+                for p in glob.glob(os.path.join(sdir, "*.pdf")):
+                    fname = os.path.basename(p).upper()
+                    m = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*[-_ ]\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
+                    if m:
+                        return m.group(1).upper()
+                    m2 = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
+                    if m2:
+                        return m2.group(1).upper()
+
+        if hasattr(self, 'ws') and self.ws:
+            for r in range(2, self.ws.max_row + 1):
+                r_vol = str(self.ws.cell(row=r, column=3).value or "").strip()
+                r_pg = str(self.ws.cell(row=r, column=4).value or "").strip()
+                if r_vol == vol and r_pg == pg:
+                    r_btype = str(self.ws.cell(row=r, column=2).value or "").strip().upper()
+                    if r_btype in ["DR", "OR", "MR", "LR", "PR", "WR", "MISC"]:
+                        return r_btype
+                    r_itype = str(self.ws.cell(row=r, column=1).value or "").lower()
+                    if "deed" in r_itype: return "DR"
+                    if "mortgage" in r_itype: return "MR"
+                    if "lease" in r_itype: return "LR"
+
+        try:
+            v_num = int(vol)
+            if v_num <= 805:
+                return "DR"
+            else:
+                return "OR"
+        except:
+            return "DR"
+
+    def normalize_prior_ref_string(self, prior_ref_raw):
+        if not prior_ref_raw:
+            return ""
+            
+        prior_ref_clean = re.sub(r'^(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*', '', prior_ref_raw, flags=re.IGNORECASE).strip()
+        prior_ref_clean = prior_ref_clean.rstrip('.')
+        
+        # Check standard format: DR 554/912 or DR 554-912
+        m_std = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC)\s+(\d+)[/-](\d+)\b', prior_ref_clean, re.IGNORECASE)
+        if m_std:
+            btype = m_std.group(1).upper()
+            vol = m_std.group(2)
+            pg = m_std.group(3)
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        # Named book: Deed Book 554, Page 912 or Official Records 101, Page 345
+        m_named = re.search(r'\b(Deed\s*(?:Book|Record|Vol)?|Official\s*Records?|Mortgage\s*(?:Book|Record|Vol)?|Lease\s*(?:Book|Record|Vol)?)\s*[:.]?\s*(?:Vol(?:ume)?\.?\s*)?(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', prior_ref_clean, re.IGNORECASE)
+        if m_named:
+            bname = m_named.group(1).lower()
+            vol = m_named.group(2)
+            pg = m_named.group(3)
+            btype = "DR"
+            if "official" in bname: btype = "OR"
+            elif "mortgage" in bname: btype = "MR"
+            elif "lease" in bname: btype = "LR"
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        # Generic Vol 554, Page 912 or Volume 4, Page 3
+        m_vol_pg = re.search(r'\b(?:Vol(?:ume)?\.?|Bk\.?|Book)\s*(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', prior_ref_clean, re.IGNORECASE)
+        if m_vol_pg:
+            vol = m_vol_pg.group(1)
+            pg = m_vol_pg.group(2)
+            btype = self.find_book_type_for_vol_pg(vol, pg)
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        # Bare numbers: 554/912 or 554-912
+        m_bare = re.search(r'\b(\d{1,4})[/-](\d{1,4})\b', prior_ref_clean)
+        if m_bare:
+            vol = m_bare.group(1)
+            pg = m_bare.group(2)
+            btype = self.find_book_type_for_vol_pg(vol, pg)
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        return f"Prior Ref: {prior_ref_clean}"
+
     def apply_initial_formatting_pipeline(self, txt, inst_type=""):
         import re
         raw_original = txt
@@ -2643,10 +2731,10 @@ class RunsheetEditorWindow(tk.Toplevel):
         while re.search(dup_book_pattern, txt, flags=re.IGNORECASE):
             txt = re.sub(dup_book_pattern, '', txt, flags=re.IGNORECASE)
 
-        # Extract Prior Ref
+        # Extract and normalize Prior Ref
         prior_ref_match = re.search(r'(Prior Ref:[^\n\.]*(?:\.|$))', txt, re.IGNORECASE)
         if prior_ref_match:
-            prior_ref_str = prior_ref_match.group(1).strip()
+            prior_ref_str = self.normalize_prior_ref_string(prior_ref_match.group(1).strip())
             txt = txt.replace(prior_ref_match.group(0), "").strip()
 
         # EXCEPTING / RESERVING
@@ -2821,6 +2909,11 @@ class RunsheetEditorWindow(tk.Toplevel):
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
+            # Prior Ref normalization in comments
+            def repl_prior_ref_match(m):
+                return self.normalize_prior_ref_string(m.group(0))
+            txt = re.sub(r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*[^\n\.;]+', repl_prior_ref_match, txt, flags=re.IGNORECASE)
+
             if "\u200B" not in txt:
                 txt = "\u200B" + txt
                 

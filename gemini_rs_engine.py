@@ -71,6 +71,61 @@ def get_subject_land_context(parcel_dir):
 
     return "\n".join(subject_info)
 
+def normalize_prior_ref_text(text, parcel_dir=None):
+    if not text: return text
+    
+    def find_book_type(vol, pg):
+        vol = str(vol).strip()
+        pg = str(pg).strip()
+        if parcel_dir and os.path.exists(parcel_dir):
+            import glob
+            for p in glob.glob(os.path.join(parcel_dir, "**", "*.pdf"), recursive=True):
+                fname = os.path.basename(p).upper()
+                m = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*[-_ ]\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
+                if m: return m.group(1).upper()
+                m2 = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC|PL)\s*' + re.escape(vol) + r'\s*[-_ /]\s*' + re.escape(pg) + r'\b', fname)
+                if m2: return m2.group(1).upper()
+        try:
+            return "DR" if int(vol) <= 805 else "OR"
+        except:
+            return "DR"
+
+    def repl_prior_ref(m):
+        full_ref = m.group(1)
+        m_std = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC)\s+(\d+)[/-](\d+)\b', full_ref, re.IGNORECASE)
+        if m_std:
+            return f"Prior Ref: {m_std.group(1).upper()} {m_std.group(2)}/{m_std.group(3)}"
+            
+        m_named = re.search(r'\b(Deed\s*(?:Book|Record|Vol)?|Official\s*Records?|Mortgage\s*(?:Book|Record|Vol)?|Lease\s*(?:Book|Record|Vol)?)\s*[:.]?\s*(?:Vol(?:ume)?\.?\s*)?(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', full_ref, re.IGNORECASE)
+        if m_named:
+            bname = m_named.group(1).lower()
+            vol = m_named.group(2)
+            pg = m_named.group(3)
+            btype = "DR"
+            if "official" in bname: btype = "OR"
+            elif "mortgage" in bname: btype = "MR"
+            elif "lease" in bname: btype = "LR"
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        m_vol_pg = re.search(r'\b(?:Vol(?:ume)?\.?|Bk\.?|Book)\s*(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', full_ref, re.IGNORECASE)
+        if m_vol_pg:
+            vol = m_vol_pg.group(1)
+            pg = m_vol_pg.group(2)
+            btype = find_book_type(vol, pg)
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        m_bare = re.search(r'\b(\d{1,4})[/-](\d{1,4})\b', full_ref)
+        if m_bare:
+            vol = m_bare.group(1)
+            pg = m_bare.group(2)
+            btype = find_book_type(vol, pg)
+            return f"Prior Ref: {btype} {vol}/{pg}"
+
+        return m.group(0)
+
+    pattern = r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*([^\n\.;]+)'
+    return re.sub(pattern, repl_prior_ref, text, flags=re.IGNORECASE)
+
 def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, parcel_dir=None, model="gemini-3.6-flash"):
     """
     Analyzes a single document PDF with Gemini vision.
@@ -305,7 +360,7 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
 
         res_data, err = analyze_document_with_gemini(api_key, target_pdf, row_meta, parcel_dir=parcel_dir, model=model)
         if res_data and isinstance(res_data, dict):
-            gemini_comm = res_data.get("comments", "").strip()
+            gemini_comm = normalize_prior_ref_text(res_data.get("comments", "").strip(), parcel_dir=parcel_dir)
             if "comments" in col_map and gemini_comm:
                 raw_existing = str(ws.cell(row=r_idx, column=col_map["comments"]).value or "").strip()
                 
