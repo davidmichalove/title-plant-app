@@ -126,6 +126,20 @@ def normalize_prior_ref_text(text, parcel_dir=None):
     pattern = r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*([^\n\.;]+)'
     return re.sub(pattern, repl_prior_ref, text, flags=re.IGNORECASE)
 
+def normalize_gemini_comment(text, parcel_dir=None):
+    if not text: return text
+    text = normalize_prior_ref_text(text, parcel_dir=parcel_dir)
+    
+    # Ensure ARTI is followed by "Conveys all right, title, and interest"
+    if text.startswith("ARTI\n"):
+        rest = text[5:].strip()
+        if not re.search(r'convey.*right.*title.*interest', rest, re.IGNORECASE):
+            text = "ARTI\nConveys all right, title, and interest\n" + rest
+    elif text.strip() == "ARTI":
+        text = "ARTI\nConveys all right, title, and interest"
+        
+    return text
+
 def analyze_document_with_gemini(api_key, pdf_path, row_meta=None, parcel_dir=None, model="gemini-3.6-flash"):
     """
     Analyzes a single document PDF with Gemini vision.
@@ -168,11 +182,13 @@ TARGET SUBJECT LAND (TARGET PARCEL):
 REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
 - Standard Warranty Deed:
   ARTI
+  Conveys all right, title, and interest
   No dower mentioned
   Prior Ref: DR 372/194
 
 - Warranty Deed with Dower:
   ARTI
+  Conveys all right, title, and interest
   Dower released
   Prior Ref: DR 472/690
 
@@ -183,6 +199,7 @@ REAL RUNSHEET COMMENT EXAMPLES FROM CLIENT SOPS:
 
 - Deed with Mineral / Oil & Gas Exception:
   ARTI
+  Conveys all right, title, and interest
   [[BOLD_START]]EXCEPTING all oil and gas rights.[[BOLD_END]]
   No dower mentioned
   Prior Ref: DR 500/100
@@ -226,7 +243,7 @@ STRICT RULES FOR THE "comments" FIELD:
    Maturity Date: MM/DD/YYYY (or "Not stated")
    Dower released (or "No dower mentioned")
    Release: [Book] [Vol]/[Pg] (if released, or omit if unreleased)
-5. CONVEYANCE: Use "ARTI" for fee simple conveyance, or state fractional interest (e.g. "Undivided 1/2 interest").
+5. CONVEYANCE: For fee simple conveyance, use "ARTI" followed on the next line by "Conveys all right, title, and interest" (or state fractional interest, e.g. "Undivided 1/2 interest").
 6. OIL & GAS / RESERVATIONS: If O&G, coal, or life estates are reserved/excepted, wrap that single brief line in [[BOLD_START]]...[[BOLD_END]].
 7. PRIOR REF: Strictly "Prior Ref: [Book] [Vol]/[Pg]" or case number.
 8. SOURCE PROVENANCE (ZERO HALLUCINATIONS): Put all verbatim quotes, exact page numbers, visual highlight descriptions, and legal reasoning inside "source_provenance".
@@ -244,7 +261,7 @@ Return a STRICT JSON object with this exact structure:
   "grantor": "...",
   "grantee": "...",
   "conveyance": "Fee Simple",
-  "comments": "ARTI\\nDower released\\nPrior Ref: DR 362/222",
+  "comments": "ARTI\\nConveys all right, title, and interest\\nDower released\\nPrior Ref: DR 362/222",
   "source_provenance": {{
     "subject_tract_quote": "Verbatim quote of tract from PDF",
     "subject_tract_page": 1,
@@ -360,7 +377,7 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
 
         res_data, err = analyze_document_with_gemini(api_key, target_pdf, row_meta, parcel_dir=parcel_dir, model=model)
         if res_data and isinstance(res_data, dict):
-            gemini_comm = normalize_prior_ref_text(res_data.get("comments", "").strip(), parcel_dir=parcel_dir)
+            gemini_comm = normalize_gemini_comment(res_data.get("comments", "").strip(), parcel_dir=parcel_dir)
             if "comments" in col_map and gemini_comm:
                 raw_existing = str(ws.cell(row=r_idx, column=col_map["comments"]).value or "").strip()
                 
