@@ -815,10 +815,10 @@ class AutomatorApp:
                     folders.append(item)
                     if item.upper() == "DOCS":
                         docs_exists = True
-                        if os.path.exists(os.path.join(item_path, "docket")):
-                            folders.append("DOCS/docket")
-                        if os.path.exists(os.path.join(item_path, "Irrelevant")):
-                            folders.append("DOCS/Irrelevant")
+                        for sub_item in sorted(os.listdir(item_path)):
+                            sub_p = os.path.join(item_path, sub_item)
+                            if os.path.isdir(sub_p) and not sub_item.startswith("."):
+                                folders.append(f"DOCS/{sub_item}")
                     if item.upper() == "WELL INFO":
                         for sub_item in os.listdir(item_path):
                             if os.path.isdir(os.path.join(item_path, sub_item)):
@@ -2118,10 +2118,10 @@ class AutomatorApp:
             self.log(f"Error fetching PDF from {url}: {e}")
             return False
 
-    def copy_local_deed(self, parcel_num, vol, pg, is_next_page=False, doc_type="Deed", auto_open=True):
+    def copy_local_deed(self, parcel_num, vol, pg, is_next_page=False, doc_type="Deed", auto_open=True, custom_dest_dir=None):
         try:
             pid_dir = self.get_parcel_dir(parcel_num)
-            docket_dir = os.path.join(pid_dir, "DOCS", "docket")
+            docket_dir = custom_dest_dir if custom_dest_dir else os.path.join(pid_dir, "DOCS", "docket")
             os.makedirs(docket_dir, exist_ok=True)
             
             vol_str = str(vol).strip()
@@ -3795,6 +3795,10 @@ end tell'''
                     except Exception as e:
                         self.log(f"Error writing results for {name}: {str(e)}")
                         
+                    if all_parsed_rows and hasattr(self, 'root'):
+                        # Launch interactive results and downloader dialog on UI thread
+                        self.root.after(0, lambda n=name, r=list(all_parsed_rows), pd=pid_dir: self.show_name_search_results_dialog(n, r, pd))
+                        
                     context.close()
                     
                 browser.close()
@@ -3807,20 +3811,269 @@ end tell'''
                     self.update_viewer_folders()
                     self.viewer_folder_combo.set("DOCS")
                     self.refresh_viewer_list()
-                    # Open results file so user sees it
-                    try:
-                        import subprocess, sys
-                        if sys.platform == "darwin":
-                            subprocess.Popen(["open", out_file])
-                        elif sys.platform == "win32":
-                            os.startfile(out_file)
-                        else:
-                            subprocess.Popen(["xdg-open", out_file])
-                    except: pass
                 self.root.after(0, refresh_ui)
                 
         except Exception as e:
             self.log(f"Kofile name search failed: {e}")
+
+    def show_name_search_results_dialog(self, owner_name, records, pid_dir):
+        if not records:
+            from tkinter import messagebox
+            messagebox.showinfo("Name Search Results", f"No documents found on Kofile for '{owner_name}'.", parent=self.root)
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Name Search Results: {owner_name} ({len(records)} Documents)")
+        dialog.geometry("1100x650")
+        dialog.minsize(850, 500)
+        dialog.transient(self.root)
+        
+        clean_folder_name = "".join(c for c in owner_name if c.isalnum() or c in " _-").strip() or "Name_Search_Docs"
+        parcel_num = os.path.basename(pid_dir).replace("PID ", "").strip()
+        
+        # State tracking: selected row keys (by index in records list)
+        selected_keys = set()
+        
+        # Top banner frame
+        top_frame = ttk.Frame(dialog, padding=(12, 10))
+        top_frame.pack(fill=tk.X)
+        
+        title_lbl = ttk.Label(top_frame, text=f"📋 Search Results for: {owner_name}", font=("Helvetica", 14, "bold"))
+        title_lbl.pack(anchor=tk.W)
+        
+        sub_lbl = ttk.Label(top_frame, text=f"Found {len(records)} records on Belmont County Recorder. Select the documents you wish to download below:", foreground="#555555")
+        sub_lbl.pack(anchor=tk.W, pady=(2, 6))
+        
+        folder_frame = ttk.Frame(top_frame)
+        folder_frame.pack(fill=tk.X, pady=(2, 4))
+        ttk.Label(folder_frame, text="📁 Save Folder:  DOCS / ", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT)
+        folder_var = tk.StringVar(value=clean_folder_name)
+        folder_entry = ttk.Entry(folder_frame, textvariable=folder_var, width=32, font=("Helvetica", 11))
+        folder_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Filter and selection control toolbar
+        toolbar = ttk.Frame(dialog, padding=(12, 4))
+        toolbar.pack(fill=tk.X)
+        
+        ttk.Label(toolbar, text="Filter:").pack(side=tk.LEFT, padx=(0, 4))
+        filter_var = tk.StringVar()
+        filter_entry = ttk.Entry(toolbar, textvariable=filter_var, width=20)
+        filter_entry.pack(side=tk.LEFT, padx=(0, 8))
+        
+        btn_sel_all = ttk.Button(toolbar, text="Select All", width=10)
+        btn_sel_all.pack(side=tk.LEFT, padx=2)
+        
+        btn_desel_all = ttk.Button(toolbar, text="Deselect All", width=11)
+        btn_desel_all.pack(side=tk.LEFT, padx=2)
+        
+        btn_sel_deeds = ttk.Button(toolbar, text="Only Deeds", width=11)
+        btn_sel_deeds.pack(side=tk.LEFT, padx=2)
+        
+        btn_sel_leases = ttk.Button(toolbar, text="Only Leases", width=11)
+        btn_sel_leases.pack(side=tk.LEFT, padx=2)
+        
+        btn_sel_mtgs = ttk.Button(toolbar, text="Only Mortgages", width=13)
+        btn_sel_mtgs.pack(side=tk.LEFT, padx=2)
+        
+        count_lbl = ttk.Label(toolbar, text="Selected: 0 of 0", font=("Helvetica", 11, "bold"), foreground="#0066cc")
+        count_lbl.pack(side=tk.RIGHT, padx=5)
+        
+        # Treeview Frame
+        tree_frame = ttk.Frame(dialog, padding=(12, 4))
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        cols = ("sel", "type", "volpg", "date", "grantor", "grantee", "legal")
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended")
+        
+        tree.heading("sel", text="[ ✓ ]")
+        tree.heading("type", text="Document Type")
+        tree.heading("volpg", text="Vol / Pg")
+        tree.heading("date", text="Recorded Date")
+        tree.heading("grantor", text="Grantor / Direct")
+        tree.heading("grantee", text="Grantee / Reverse")
+        tree.heading("legal", text="Legal / Notes")
+        
+        tree.column("sel", width=50, minwidth=40, anchor=tk.CENTER)
+        tree.column("type", width=120, minwidth=80, anchor=tk.W)
+        tree.column("volpg", width=85, minwidth=70, anchor=tk.CENTER)
+        tree.column("date", width=90, minwidth=75, anchor=tk.CENTER)
+        tree.column("grantor", width=180, minwidth=100, anchor=tk.W)
+        tree.column("grantee", width=180, minwidth=100, anchor=tk.W)
+        tree.column("legal", width=280, minwidth=150, anchor=tk.W)
+        
+        sb_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        sb_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=tree.xview)
+        tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        
+        tree.grid(row=0, column=0, sticky="nsew")
+        sb_y.grid(row=0, column=1, sticky="ns")
+        sb_x.grid(row=1, column=0, sticky="ew")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+        
+        tree.tag_configure("even", background="#ffffff")
+        tree.tag_configure("odd", background="#f8f9fa")
+        tree.tag_configure("checked", background="#e8f4fd")
+        
+        def refresh_table(*args):
+            query = filter_var.get().lower().strip()
+            tree.delete(*tree.get_children())
+            visible_count = 0
+            for idx, r in enumerate(records):
+                inst, dtype, volpg, date, grantor, grantee, legal = r
+                row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
+                if query and query not in row_str:
+                    continue
+                    
+                is_checked = idx in selected_keys
+                check_mark = "[ ✓ ]" if is_checked else "[   ]"
+                tag = "checked" if is_checked else ("even" if visible_count % 2 == 0 else "odd")
+                
+                tree.insert("", tk.END, iid=str(idx), values=(check_mark, dtype, volpg, date, grantor, grantee, legal), tags=(tag,))
+                visible_count += 1
+                
+            count_lbl.config(text=f"Selected: {len(selected_keys)} of {len(records)} ({visible_count} visible)")
+            
+        def toggle_selection(event=None):
+            selected_items = tree.selection()
+            if not selected_items: return
+            for item_id in selected_items:
+                idx = int(item_id)
+                if idx in selected_keys:
+                    selected_keys.remove(idx)
+                else:
+                    selected_keys.add(idx)
+            refresh_table()
+            
+        def select_all():
+            query = filter_var.get().lower().strip()
+            for idx, r in enumerate(records):
+                if query:
+                    inst, dtype, volpg, date, grantor, grantee, legal = r
+                    row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
+                    if query in row_str:
+                        selected_keys.add(idx)
+                else:
+                    selected_keys.add(idx)
+            refresh_table()
+            
+        def deselect_all():
+            selected_keys.clear()
+            refresh_table()
+            
+        def select_type(type_kw):
+            for idx, r in enumerate(records):
+                dtype = r[1].upper()
+                if type_kw in dtype:
+                    selected_keys.add(idx)
+            refresh_table()
+            
+        tree.bind("<Double-1>", toggle_selection)
+        tree.bind("<space>", toggle_selection)
+        tree.bind("<Button-1>", lambda e: tree.after(50, toggle_selection) if tree.identify_column(e.x) == "#1" else None)
+        filter_var.trace_add("write", refresh_table)
+        
+        btn_sel_all.config(command=select_all)
+        btn_desel_all.config(command=deselect_all)
+        btn_sel_deeds.config(command=lambda: select_type("DEED"))
+        btn_sel_leases.config(command=lambda: select_type("LEASE"))
+        btn_sel_mtgs.config(command=lambda: select_type("MORT"))
+        
+        # Bottom action frame
+        bot_frame = ttk.Frame(dialog, padding=(12, 10))
+        bot_frame.pack(fill=tk.X)
+        
+        status_lbl = ttk.Label(bot_frame, text="", font=("Helvetica", 10))
+        status_lbl.pack(side=tk.LEFT)
+        
+        progress_bar = ttk.Progressbar(bot_frame, orient=tk.HORIZONTAL, mode="determinate", length=220)
+        
+        def execute_download():
+            if not selected_keys:
+                from tkinter import messagebox
+                messagebox.showwarning("No Selection", "Please select at least one document to download.", parent=dialog)
+                return
+                
+            target_fld = folder_var.get().strip() or clean_folder_name
+            target_dir = os.path.join(pid_dir, "DOCS", target_fld)
+            os.makedirs(target_dir, exist_ok=True)
+            
+            selected_records = [records[i] for i in sorted(selected_keys)]
+            
+            btn_dl.config(state=tk.DISABLED)
+            btn_close.config(state=tk.DISABLED)
+            progress_bar.pack(side=tk.LEFT, padx=10)
+            progress_bar['maximum'] = len(selected_records)
+            progress_bar['value'] = 0
+            
+            def download_worker():
+                downloaded_count = 0
+                for idx, r in enumerate(selected_records):
+                    inst, dtype, volpg, date, grantor, grantee, legal = r
+                    self.log(f"Downloading [{idx+1}/{len(selected_records)}] {dtype} {volpg} to DOCS/{target_fld}...")
+                    
+                    dialog.after(0, lambda i=idx, t=dtype, vp=volpg: status_lbl.config(text=f"Fetching ({i+1}/{len(selected_records)}): {t} {vp}..."))
+                    
+                    vol = ""
+                    pg = ""
+                    import re
+                    m = re.search(r'(\d+)\s*[-/]\s*(\d+)', volpg)
+                    if m:
+                        vol = m.group(1)
+                        pg = m.group(2)
+                    elif volpg.isdigit():
+                        vol = volpg
+                        pg = "1"
+                        
+                    if vol and pg:
+                        # 1. Try local drive archive first
+                        res = self.copy_local_deed(parcel_num, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
+                        if not res:
+                            # 2. Scrape from Kofile web portal
+                            self._fetch_kofile_deed_background(vol, pg, parcel_num, doc_type=dtype, custom_docs_dir=target_dir, auto_open=False)
+                        downloaded_count += 1
+                        
+                    dialog.after(0, lambda i=idx+1: progress_bar.config(value=i))
+                    
+                def on_done():
+                    btn_dl.config(state=tk.NORMAL)
+                    btn_close.config(state=tk.NORMAL)
+                    progress_bar.pack_forget()
+                    status_lbl.config(text=f"✅ Finished downloading {downloaded_count} documents to DOCS/{target_fld}!")
+                    
+                    # Refresh Document Viewer folders
+                    self.update_viewer_folders()
+                    target_combo_val = f"DOCS/{target_fld}"
+                    if target_combo_val in self.viewer_folder_combo['values']:
+                        self.viewer_folder_combo.set(target_combo_val)
+                    self.refresh_viewer_list()
+                    
+                    from tkinter import messagebox
+                    msg = f"Successfully downloaded {downloaded_count} documents into folder:\nDOCS/{target_fld}/\n\nWould you like to open this folder in Finder?"
+                    if messagebox.askyesno("Download Complete", msg, parent=dialog):
+                        import subprocess, sys
+                        try:
+                            if sys.platform == "darwin":
+                                subprocess.Popen(["open", target_dir])
+                            elif sys.platform == "win32":
+                                os.startfile(target_dir)
+                            else:
+                                subprocess.Popen(["xdg-open", target_dir])
+                        except: pass
+                        
+                dialog.after(0, on_done)
+                
+            import threading
+            threading.Thread(target=download_worker, daemon=True).start()
+            
+        btn_close = ttk.Button(bot_frame, text="Close", command=dialog.destroy)
+        btn_close.pack(side=tk.RIGHT, padx=5)
+        
+        btn_dl = ttk.Button(bot_frame, text="⬇️ Download Selected Documents", command=execute_download)
+        btn_dl.pack(side=tk.RIGHT, padx=5)
+        
+        # Initial table population
+        refresh_table()
 
     def _fetch_court_name_search(self, search_params, pid_dir):
         if not search_params:
