@@ -1769,11 +1769,12 @@ class RunsheetEditorWindow(tk.Toplevel):
 
     def highlight_links(self, widget):
         widget.tag_remove("hyperlink", "1.0", "end")
+        for tag in list(widget.tag_names()):
+            if tag.startswith("link_val_"):
+                widget.tag_remove(tag, "1.0", "end")
+                
         text = widget.get("1.0", "end-1c")
         if not text: return
-        
-        valid_pairs = self.get_local_docs()
-        if not valid_pairs: return
         
         widget.tag_configure("hyperlink", foreground="blue", underline=True)
         widget.tag_bind("hyperlink", "<Enter>", lambda e: widget.config(cursor="hand2"))
@@ -1786,65 +1787,112 @@ class RunsheetEditorWindow(tk.Toplevel):
                 if t.startswith("link_val_"):
                     vol_pg = t.split("link_val_")[1]
                     vol, pg = vol_pg.split('-')
+                    clean_v = vol.lstrip('0') or '0'
+                    clean_p = pg.lstrip('0') or '0'
                     
+                    # 1. Try to jump to corresponding row in Runsheet Editor
                     vol_col = None
                     pg_col = None
                     for i, h in enumerate(self.headers):
-                        if "vol" in h.lower() or "book" in h.lower():
+                        hl = h.lower()
+                        if "vol" in hl and "page" not in hl:
                             vol_col = i + 1
-                        elif "page" in h.lower():
+                        elif "page" in hl and "vol" not in hl:
                             pg_col = i + 1
                             
-                    if not vol_col or not pg_col: return
+                    if vol_col and pg_col:
+                        for row_idx in range(3, self.ws.max_row + 1):
+                            r_vol = str(self.ws.cell(row=row_idx, column=vol_col).value or "").strip().lstrip('0') or '0'
+                            r_pg = str(self.ws.cell(row=row_idx, column=pg_col).value or "").strip().lstrip('0') or '0'
+                            if r_vol == clean_v and r_pg == clean_p:
+                                if self.current_row_idx:
+                                    try: self.save_row(show_msg=False)
+                                    except Exception as e: print("SAVE ROW FAILED DURING JUMP:", e)
+                                if row_idx not in self.row_indices:
+                                    self.search_var.set("")
+                                    self.filter_var.set("All")
+                                    self.load_rows()
+                                    
+                                if row_idx in self.row_indices:
+                                    lb_idx = self.row_indices.index(row_idx)
+                                    self.listbox.selection_clear(0, tk.END)
+                                    self.listbox.selection_set(lb_idx)
+                                    self.listbox.see(lb_idx)
+                                    self.on_select(None)
+                                break
                     
-                    for row_idx in range(3, self.ws.max_row + 1):
-                        r_vol = str(self.ws.cell(row=row_idx, column=vol_col).value or "").strip()
-                        r_pg = str(self.ws.cell(row=row_idx, column=pg_col).value or "").strip()
-                        if r_vol == vol and r_pg == pg:
-                            # Implicitly save current row before jumping
-                            if self.current_row_idx:
-                                try: self.save_row(show_msg=False)
-                                except Exception as e: print("SAVE ROW FAILED DURING JUMP:", e)
-                            if row_idx not in self.row_indices:
-                                self.search_var.set("")
-                                self.filter_var.set("All")
-                                self.load_rows()
-                                
-                            if row_idx in self.row_indices:
-                                lb_idx = self.row_indices.index(row_idx)
-                                self.listbox.selection_clear(0, tk.END)
-                                self.listbox.selection_set(lb_idx)
-                                self.listbox.see(lb_idx)
-                                self.on_select(None)
-                            return
+                    # 2. Try to open local document PDF
+                    import glob, subprocess
+                    found_doc = None
+                    
+                    # Search local assignment folder / DOCS
+                    for ext in ("*.pdf", "*.txt", "*.doc", "*.docx", "*.rtf", "*.png", "*.jpg", "*.tif", "*.tiff"):
+                        for fpath in glob.glob(os.path.join(self.pid_dir, "**", ext), recursive=True):
+                            fname = os.path.basename(fpath)
+                            if fname.startswith("._"): continue
+                            if f"{clean_v}-{clean_p}" in fname or f"{clean_v}_{clean_p}" in fname or f"{vol}-{pg}" in fname or f"{vol}_{pg}" in fname:
+                                found_doc = fpath
+                                break
+                        if found_doc: break
+                        
+                    # Search Archives if not found locally
+                    if not found_doc:
+                        vol_pad = vol.zfill(3) if vol.isdigit() else vol
+                        vol_pad_4 = vol.zfill(4) if vol.isdigit() else vol
+                        archives = [
+                            f"/Volumes/davidlls/drive/DEEDS/DEED {vol_pad}",
+                            f"/Volumes/davidlls/drive/MTGS/MTG {vol_pad}",
+                            f"/Volumes/davidlls/drive/extracted/DEEDS/DEED {vol_pad}",
+                            f"/Volumes/davidlls/drive/extracted/MTGS/MTG {vol_pad}",
+                            f"/Volumes/davidlls/Belmont_Drive_External/Belmont County Court House/2. Belmont Deeds/DEED {vol_pad}",
+                            f"/Volumes/davidlls/Belmont_Drive_External/Belmont County Court House/3. Belmont Leases/{vol_pad_4}"
+                        ]
+                        for archive_dir in archives:
+                            if os.path.exists(archive_dir):
+                                for ext in ("*.pdf", "*.tif", "*.jpg", "*.png"):
+                                    for doc in glob.glob(os.path.join(archive_dir, f"*{clean_v}-{clean_p}*{ext}")):
+                                        found_doc = doc
+                                        break
+                                    if found_doc: break
+                                    for doc in glob.glob(os.path.join(archive_dir, f"*{clean_v}_{clean_p}*{ext}")):
+                                        found_doc = doc
+                                        break
+                                    if found_doc: break
+                                    for doc in glob.glob(os.path.join(archive_dir, f"*{clean_p}*{ext}")):
+                                        found_doc = doc
+                                        break
+                            if found_doc: break
+                            
+                    if found_doc:
+                        try:
+                            if os.name == 'nt':
+                                os.startfile(found_doc)
+                            else:
+                                subprocess.Popen(['open', found_doc])
+                        except Exception as ex:
+                            print(f"Error opening link doc: {ex}")
+                    return
         
         widget.tag_bind("hyperlink", "<Button-1>", on_click)
         
         import re
-        for vpg in valid_pairs:
-            v, p = vpg.split('-')
-            
-            # Find "Vol X Pg Y"
-            pattern1 = re.compile(r'Vol(?:ume|\.)?\s*' + v + r'\b\s*P(?:a)?g(?:e|\.)?\s*' + p + r'\b', re.IGNORECASE)
-            for match in pattern1.finditer(text):
-                start_idx = f"1.0+{match.start()}c"
-                end_idx = f"1.0+{match.end()}c"
-                widget.tag_add("hyperlink", start_idx, end_idx)
-                widget.tag_add(f"link_val_{vpg}", start_idx, end_idx)
-                
-            # Find "X-Y"
-            pattern2 = re.compile(r'(?<!\d)' + v + r'-' + p + r'(?!\d)')
-            for match in pattern2.finditer(text):
-                start_idx = f"1.0+{match.start()}c"
-                end_idx = f"1.0+{match.end()}c"
-                widget.tag_add("hyperlink", start_idx, end_idx)
-                widget.tag_add(f"link_val_{vpg}", start_idx, end_idx)
-                
-            # Find "X/Y"
-            pattern3 = re.compile(r'(?<!\d)' + v + r'/' + p + r'(?!\d)')
-            for match in pattern3.finditer(text):
-                start_idx = f"1.0+{match.start()}c"
-                end_idx = f"1.0+{match.end()}c"
+        patterns = [
+            r'\b(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB)\s*(\d{1,4})\s*[-/]\s*(\d{1,4})\b',
+            r'\bVol(?:ume|\.)?\s*(\d{1,4})\s*,?\s*P(?:a)?g(?:e|\.)?\s*(\d{1,4})\b',
+            r'(?<!\d)(\d{1,4})\s*[-/]\s*(\d{1,4})(?!\d)'
+        ]
+        seen_spans = []
+        for pat in patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                start, end = m.start(), m.end()
+                # Avoid overlapping spans
+                if any(s <= start < e or s < end <= e for s, e in seen_spans):
+                    continue
+                seen_spans.append((start, end))
+                v, p = m.group(1), m.group(2)
+                vpg = f"{v}-{p}"
+                start_idx = f"1.0+{start}c"
+                end_idx = f"1.0+{end}c"
                 widget.tag_add("hyperlink", start_idx, end_idx)
                 widget.tag_add(f"link_val_{vpg}", start_idx, end_idx)
                 
@@ -3062,17 +3110,18 @@ class RunsheetEditorWindow(tk.Toplevel):
                 else:
                     return f'Release: {book} {vol}/{pg}'
                     
-            rel_pattern = r'(?:Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            rel_pattern = r'(?:Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
             txt = re.sub(rel_pattern, format_released, txt, flags=re.IGNORECASE)
-            txt = re.sub(r'([^\n\u200B])\s*(Releases mortgage recorded in)', r'\1\n\2', txt)
-            txt = re.sub(r'([^\n\u200B])\s*(Release:)', r'\1\n\2', txt)
-            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)[.,;]?\s+(?=[A-Za-z0-9])', r'\1\n', txt)
+            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Releases mortgage recorded in)', r'\1\n\2', txt)
+            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Release:)', r'\1\n\2', txt)
+            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(No dower mentioned\.)', r'\1\n\2', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
             # Prior Ref normalization in comments
             def repl_prior_ref_match(m):
-                return "\n" + self.normalize_prior_ref_string(m.group(0))
+                return self.normalize_prior_ref_string(m.group(0).strip())
             txt = re.sub(r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*[^\n\.;]+', repl_prior_ref_match, txt, flags=re.IGNORECASE)
+            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Prior Ref:)', r'\1\n\2', txt)
             txt = re.sub(r'\n{3,}', '\n\n', txt)
 
             if "\u200B" not in txt:
