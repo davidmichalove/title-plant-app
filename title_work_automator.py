@@ -2010,7 +2010,7 @@ class AutomatorApp:
     def run_manual_scrape(self, parcel_num, vol, pg, doc_type="ALL"):
         try:
             self.log(f"Starting manual web scrape for Vol: {vol}, Pg: {pg}")
-            self._fetch_kofile_deed_background(vol, pg, parcel_num, doc_type)
+            self._fetch_kofile_deed_background(vol, pg, parcel_num, doc_type, auto_open=True)
             
             # Auto-update the viewer to show the docket folder
             def switch_to_docket():
@@ -2118,7 +2118,7 @@ class AutomatorApp:
             self.log(f"Error fetching PDF from {url}: {e}")
             return False
 
-    def copy_local_deed(self, parcel_num, vol, pg, is_next_page=False, doc_type="Deed"):
+    def copy_local_deed(self, parcel_num, vol, pg, is_next_page=False, doc_type="Deed", auto_open=True):
         try:
             pid_dir = self.get_parcel_dir(parcel_num)
             docket_dir = os.path.join(pid_dir, "DOCS", "docket")
@@ -2293,6 +2293,18 @@ class AutomatorApp:
             if hasattr(self, 'next_page_btn'):
                 self.next_page_btn.config(state=tk.NORMAL)
             
+            if auto_open:
+                import subprocess, sys
+                try:
+                    if sys.platform == "darwin":
+                        subprocess.Popen(["open", dest_file])
+                    elif sys.platform == "win32":
+                        os.startfile(dest_file)
+                    else:
+                        subprocess.Popen(["xdg-open", dest_file])
+                except Exception as ex:
+                    self.log(f"Error opening photo: {ex}")
+            
             return True
             
         except Exception as e:
@@ -2368,7 +2380,7 @@ class AutomatorApp:
             # If not found locally, try scraping from website as fallback
             if not res:
                 self.log(f"Next page {vol}-{next_pg} not found in local archives. Attempting website fetch...")
-                self._fetch_kofile_deed_background(vol, next_pg, parcel, doc_type)
+                self._fetch_kofile_deed_background(vol, next_pg, parcel, doc_type, auto_open=True)
 
         import threading
         threading.Thread(target=do_fetch, daemon=True).start()
@@ -3903,7 +3915,7 @@ end tell'''
             import traceback
             traceback.print_exc()
 
-    def _fetch_kofile_deed_background(self, vol_val, pg_val, parcel_num, doc_type="ALL", custom_docs_dir=None):
+    def _fetch_kofile_deed_background(self, vol_val, pg_val, parcel_num, doc_type="ALL", custom_docs_dir=None, auto_open=False):
         try:
             self.log(f"Starting Kofile scraper for Volume {vol_val}, Page {pg_val} (Type: {doc_type})...")
             
@@ -4140,6 +4152,18 @@ end tell'''
                 
                 browser.close()
                 self.refresh_viewer_list()
+                
+                if auto_open:
+                    import subprocess, sys
+                    try:
+                        if sys.platform == "darwin":
+                            subprocess.Popen(["open", target_path])
+                        elif sys.platform == "win32":
+                            os.startfile(target_path)
+                        else:
+                            subprocess.Popen(["xdg-open", target_path])
+                    except Exception as ex:
+                        self.log(f"Error opening downloaded document: {ex}")
         except Exception as e:
             self.log(f"Error in Kofile scraper: {e}")
 
