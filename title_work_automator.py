@@ -1269,6 +1269,18 @@ class AutomatorApp:
                         except:
                             pass
                             
+            def launch_auto_open(target):
+                try:
+                    import sys, subprocess, os
+                    if sys.platform == "darwin":
+                        subprocess.Popen(["open", target])
+                    elif sys.platform == "win32":
+                        os.startfile(target)
+                    else:
+                        subprocess.Popen(["xdg-open", target])
+                except Exception as ex:
+                    self.log(f"Auto-open warning: {ex}")
+
             if len(filepaths) == 1:
                 shutil.move(filepaths[0], dest_path)
                 
@@ -1306,16 +1318,7 @@ class AutomatorApp:
                         self.refresh_viewer_list()
                 
                 self.close_preview()
-                
-                # Auto-open the compiled file
-                try:
-                    if os.name == 'nt':
-                        os.startfile(dest_path)
-                    else:
-                        import subprocess
-                        subprocess.call(('open', dest_path))
-                except:
-                    pass
+                self.root.after(150, lambda p=dest_path: launch_auto_open(p))
             else:
                 import fitz
                 merged_doc = fitz.open()
@@ -1347,6 +1350,9 @@ class AutomatorApp:
                         self.safe_move_to_irrelevant(fp)
                     except Exception as e:
                         self.log(f"Could not trash {fp}: {e}")
+
+                self.close_preview()
+                self.root.after(150, lambda p=dest_path: launch_auto_open(p))
                         
             self.drop_var.set("Drag & Drop PDF Here")
             self.dropped_filepaths = None
@@ -1441,10 +1447,22 @@ class AutomatorApp:
                                 os.remove(fp)
                         except:
                             pass
-                    self.pending_docket_files = []
-                    
+                self.close_preview()
                 self.refresh_viewer_list()
                 popup.destroy()
+
+                def auto_open_saved(p):
+                    try:
+                        import sys, subprocess, os
+                        if sys.platform == "darwin":
+                            subprocess.Popen(["open", p])
+                        elif sys.platform == "win32":
+                            os.startfile(p)
+                        else:
+                            subprocess.Popen(["xdg-open", p])
+                    except Exception as ex:
+                        self.log(f"Auto-open error: {ex}")
+                self.root.after(150, lambda p=dest_path: auto_open_saved(p))
             except Exception as e:
                 messagebox.showerror("Error", f"Could not save file: {e}")
                 
@@ -2278,9 +2296,11 @@ class AutomatorApp:
             import subprocess
             import sys
             if sys.platform == "darwin":
-                subprocess.run(["open", dest_file])
+                subprocess.Popen(["open", dest_file])
             elif sys.platform == "win32":
                 os.startfile(dest_file)
+            else:
+                subprocess.Popen(["xdg-open", dest_file])
             
             return True
             
@@ -4070,6 +4090,19 @@ end tell'''
                 
                 browser.close()
                 self.refresh_viewer_list()
+                
+                def auto_open_docket(p):
+                    try:
+                        import sys, subprocess, os
+                        if sys.platform == "darwin":
+                            subprocess.Popen(["open", p])
+                        elif sys.platform == "win32":
+                            os.startfile(p)
+                        else:
+                            subprocess.Popen(["xdg-open", p])
+                    except Exception as ex:
+                        self.log(f"Auto-open error: {ex}")
+                self.root.after(150, lambda p=target_path: auto_open_docket(p))
         except Exception as e:
             self.log(f"Error in Kofile scraper: {e}")
 
