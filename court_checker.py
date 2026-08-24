@@ -38,19 +38,20 @@ def find_input(driver, possible_names, label_text):
     """Robustly find an input field by common names or by preceding label."""
     for name in possible_names:
         try:
-            el = driver.find_element(By.XPATH, f"//input[contains(@name, '{name}') or contains(@id, '{name}')]")
+            el = driver.find_element(By.XPATH, f"//input[@name='{name}' or @id='{name}' or contains(@name, '{name}') or contains(@id, '{name}')]")
             if el.is_displayed():
                 return el
         except:
             pass
             
-    # Try finding by label
-    try:
-        el = driver.find_element(By.XPATH, f"//label[contains(text(), '{label_text}')]/following::input[1]")
-        if el.is_displayed():
-            return el
-    except:
-        pass
+    # Try finding by label or text container
+    for tag in ["label", "span", "td", "th", "div"]:
+        try:
+            el = driver.find_element(By.XPATH, f"//{tag}[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{label_text.lower()}')]/following::input[1]")
+            if el.is_displayed():
+                return el
+        except:
+            pass
         
     return None
 
@@ -81,35 +82,48 @@ def process_court_records(csv_path, update_status_callback=None):
 
         with open(csv_path, "r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
-            # Normalize column headers
-            fieldnames = [col.strip().lower() for col in reader.fieldnames]
             
             # Find the best match for first and last name columns
             fname_col = next((c for c in reader.fieldnames if 'first' in c.lower()), None)
             lname_col = next((c for c in reader.fieldnames if 'last' in c.lower()), None)
+            name_col = next((c for c in reader.fieldnames if any(k in c.lower() for k in ['name', 'owner', 'grantor', 'grantee', 'party', 'individual'])), None)
             
-            if not fname_col or not lname_col:
+            if not (fname_col and lname_col) and not name_col:
                 if update_status_callback:
-                    update_status_callback("Error: CSV must contain columns for first name and last name.")
+                    update_status_callback("Error: CSV must contain name column(s).")
                 return
 
             for row in reader:
-                fname = row.get(fname_col, "").strip()
-                lname = row.get(lname_col, "").strip()
+                fname = ""
+                lname = ""
+                if fname_col and lname_col:
+                    fname = row.get(fname_col, "").strip()
+                    lname = row.get(lname_col, "").strip()
+                elif name_col:
+                    full_n = row.get(name_col, "").strip()
+                    if "," in full_n:
+                        parts = [p.strip() for p in full_n.split(",", 1)]
+                        lname = parts[0]
+                        fname = parts[1] if len(parts) > 1 else ""
+                    else:
+                        parts = full_n.split()
+                        if len(parts) >= 2:
+                            fname = parts[0]
+                            lname = " ".join(parts[1:])
+                        else:
+                            lname = full_n
+                            fname = ""
                 
                 if not fname and not lname:
                     continue
                 
                 if update_status_callback:
-                    update_status_callback(f"Searching for {fname} {lname}...")
+                    update_status_callback(f"Searching CourtView for Last='{lname}', First='{fname}'...")
                 
                 # Navigate to the base search page to reset
-                # (We can just click the Search tab, or just use the current URL if we are already there)
-                # It's safer to re-click the Name tab or just clear the form
                 try:
-                    # Look for clear button or just clear inputs
-                    lname_input = find_input(driver, ["lastName", "last"], "Last Name")
-                    fname_input = find_input(driver, ["firstName", "first"], "First Name")
+                    lname_input = find_input(driver, ["lastName", "caseSearchForm:lastName", "last_name", "last"], "Last Name")
+                    fname_input = find_input(driver, ["firstName", "caseSearchForm:firstName", "first_name", "first"], "First Name")
                     
                     if lname_input:
                         lname_input.clear()
@@ -120,7 +134,6 @@ def process_court_records(csv_path, update_status_callback=None):
                         fname_input.send_keys(fname)
                         
                     # Find and click Search/Submit
-                    # CourtView usually has a submit button or an input with type=submit at the bottom of the form
                     submit_btn = driver.find_element(By.XPATH, "//input[@type='submit' or @value='Search'] | //button[contains(text(), 'Search')]")
                     driver.execute_script("arguments[0].click();", submit_btn)
                     

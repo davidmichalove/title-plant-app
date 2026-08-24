@@ -173,7 +173,9 @@ def generate_kofile_search_params(api_key, pdf_paths):
         {
             "owners": [
                 {
-                    "name": "Last First", // Must be Title Case. Omit middle initials! e.g., 'Vanfossen Timothy', NOT 'Vanfossen Timothy N' or 'VANFOSSEN TIMOTHY N'.
+                    "first_name": "Timothy", // First name only
+                    "last_name": "Vanfossen", // Last name or entity name only
+                    "name": "Vanfossen Timothy", // Must be Title Case 'Last First'. Omit middle initials! e.g., 'Vanfossen Timothy', NOT 'Vanfossen Timothy N' or 'VANFOSSEN TIMOTHY N'.
                     "acquisition_date": "MM/DD/YYYY", // Or null if unknown. If only year is known, use 01/01/YYYY.
                     "disposal_date": "MM/DD/YYYY" // Or null if unknown. If only year is known, use 12/31/YYYY.
                 }

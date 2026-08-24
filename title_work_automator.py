@@ -3802,17 +3802,28 @@ end tell'''
                     return
                 
                 for owner in reversed(search_params):
-                    name = owner.get("name", "")
-                    if not name: continue
+                    first_name = owner.get("first_name", "").strip()
+                    last_name = owner.get("last_name", "").strip()
                     
-                    # Try to split into first and last name
-                    # Very basic split for names like "JOHN DOE" or "DOE JOHN"
-                    # We will just put the whole name in Last Name for now to be safe, or split by space
-                    parts = name.split()
-                    last_name = parts[-1] if len(parts) > 0 else name
-                    first_name = parts[0] if len(parts) > 1 else ""
+                    if not last_name and not first_name:
+                        name = owner.get("name", "").strip()
+                        if not name: continue
+                        
+                        if "," in name:
+                            parts = [p.strip() for p in name.split(",", 1)]
+                            last_name = parts[0]
+                            first_name = parts[1] if len(parts) > 1 else ""
+                        else:
+                            parts = name.split()
+                            if len(parts) >= 2:
+                                # Title Work / AI abstracting formats names as "Last First" (e.g. "Vanfossen Timothy")
+                                last_name = parts[0]
+                                first_name = " ".join(parts[1:])
+                            else:
+                                last_name = name
+                                first_name = ""
                     
-                    self.log(f"Searching CourtView for: {last_name}, {first_name}")
+                    self.log(f"Searching CourtView for: Last='{last_name}', First='{first_name}'")
                     
                     # Navigate back to search page just in case we are on a results page
                     if "search.page.3" not in page.url:
@@ -3822,13 +3833,17 @@ end tell'''
                     page.fill("input[name='lastName']", last_name)
                     if first_name:
                         page.fill("input[name='firstName']", first_name)
+                    else:
+                        page.fill("input[name='firstName']", "")
                         
                     # Click search
                     page.click("input[type='submit'][value='Search']")
                     page.wait_for_load_state("domcontentloaded")
                     page.wait_for_timeout(3000) # Give results time to render
                     
-                    pdf_path = os.path.join(court_dir, f"CourtView_{last_name}_{first_name}.pdf")
+                    clean_l = "".join(c for c in last_name if c.isalnum() or c in " _-")
+                    clean_f = "".join(c for c in first_name if c.isalnum() or c in " _-")
+                    pdf_path = os.path.join(court_dir, f"CourtView_{clean_l}_{clean_f}.pdf")
                     self.log(f"Saving PDF to {pdf_path}...")
                     page.pdf(path=pdf_path, format="A4")
                     
