@@ -406,8 +406,13 @@ class RunsheetEditorWindow(tk.Toplevel):
             eff_dt = str(r[eff_date_col].value or "").strip() if eff_date_col != -1 and eff_date_col < len(r) else ""
             file_dt = str(r[file_date_col].value or "").strip() if file_date_col != -1 and file_date_col < len(r) else ""
             
-            p_num = None
+            v_num = None
             import re
+            m_vol = re.search(r'\d+', v_val)
+            if m_vol:
+                v_num = int(m_vol.group(0))
+                
+            p_num = None
             m_pg = re.search(r'\d+', p_val)
             if m_pg:
                 p_num = int(m_pg.group(0))
@@ -416,6 +421,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                 "row_idx": r_idx,
                 "btype": btype,
                 "vol": v_val,
+                "vol_num": v_num,
                 "page": p_val,
                 "page_num": p_num,
                 "eff_date": eff_dt,
@@ -425,35 +431,41 @@ class RunsheetEditorWindow(tk.Toplevel):
         seq_warnings_by_row = {}
         for i in range(len(seq_row_meta)):
             item_a = seq_row_meta[i]
-            if not item_a["vol"] or item_a["page_num"] is None: continue
+            if item_a["vol_num"] is None or item_a["page_num"] is None: continue
             
             for j in range(i + 1, len(seq_row_meta)):
                 item_b = seq_row_meta[j]
-                if not item_b["vol"] or item_b["page_num"] is None: continue
+                if item_b["vol_num"] is None or item_b["page_num"] is None: continue
                 
-                # Must be same volume
-                if item_a["vol"] == item_b["vol"]:
-                    if item_a["btype"] and item_b["btype"] and item_a["btype"].upper() != item_b["btype"].upper():
-                        continue
-                        
-                    # Same effective date or same file date
-                    same_eff = item_a["eff_date"] and item_b["eff_date"] and (item_a["eff_date"] == item_b["eff_date"])
-                    same_file = item_a["file_date"] and item_b["file_date"] and (item_a["file_date"] == item_b["file_date"])
+                # Check compatible book type
+                if item_a["btype"] and item_b["btype"] and item_a["btype"].upper() != item_b["btype"].upper():
+                    continue
                     
-                    if same_eff or same_file:
-                        if item_a["page_num"] > item_b["page_num"]:
-                            v = item_a["vol"]
-                            p_a = item_a["page"]
-                            p_b = item_b["page"]
-                            rb_idx = item_b["row_idx"]
-                            ra_idx = item_a["row_idx"]
-                            d_str = item_a["eff_date"] if same_eff else item_a["file_date"]
-                            
-                            w_a = f"Page sequence error: Vol {v} Pg {p_a} placed before lower Pg {p_b} (Row {rb_idx}) with same date ({d_str})"
-                            w_b = f"Page sequence error: Vol {v} Pg {p_b} placed after higher Pg {p_a} (Row {ra_idx}) with same date ({d_str})"
-                            
-                            seq_warnings_by_row.setdefault(item_a["row_idx"], []).append(w_a)
-                            seq_warnings_by_row.setdefault(item_b["row_idx"], []).append(w_b)
+                # Same effective date or same file date
+                same_eff = bool(item_a["eff_date"] and item_b["eff_date"] and (item_a["eff_date"] == item_b["eff_date"]))
+                same_file = bool(item_a["file_date"] and item_b["file_date"] and (item_a["file_date"] == item_b["file_date"]))
+                
+                date_match = (same_eff and same_file) or (same_eff and not item_a["file_date"] and not item_b["file_date"]) or (same_file and not item_a["eff_date"] and not item_b["eff_date"]) or same_eff or same_file
+                
+                if date_match:
+                    d_str = item_a["eff_date"] if same_eff else item_a["file_date"]
+                    v_a, v_b = item_a["vol"], item_b["vol"]
+                    p_a, p_b = item_a["page"], item_b["page"]
+                    ra_idx, rb_idx = item_a["row_idx"], item_b["row_idx"]
+                    
+                    # 1. Volume sequence check (smaller volume must go first)
+                    if item_a["vol_num"] > item_b["vol_num"]:
+                        w_a = f"Sequence error: Vol {v_a} placed before smaller Vol {v_b} (Row {rb_idx}) with same date ({d_str})"
+                        w_b = f"Sequence error: Vol {v_b} placed after larger Vol {v_a} (Row {ra_idx}) with same date ({d_str})"
+                        seq_warnings_by_row.setdefault(item_a["row_idx"], []).append(w_a)
+                        seq_warnings_by_row.setdefault(item_b["row_idx"], []).append(w_b)
+                        
+                    # 2. Page sequence check (same volume, smaller page must go first)
+                    elif item_a["vol_num"] == item_b["vol_num"] and item_a["page_num"] > item_b["page_num"]:
+                        w_a = f"Page sequence error: Vol {v_a} Pg {p_a} placed before lower Pg {p_b} (Row {rb_idx}) with same date ({d_str})"
+                        w_b = f"Page sequence error: Vol {v_b} Pg {p_b} placed after higher Pg {p_a} (Row {ra_idx}) with same date ({d_str})"
+                        seq_warnings_by_row.setdefault(item_a["row_idx"], []).append(w_a)
+                        seq_warnings_by_row.setdefault(item_b["row_idx"], []).append(w_b)
 
         for row_idx in range(3, self.ws.max_row + 1):
             row = self.ws[row_idx]
