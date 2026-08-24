@@ -779,14 +779,14 @@ class RunsheetEditorWindow(tk.Toplevel):
                             except: pass
                             
                             # if no release in notes at all, or if this specific one is missing
-                            if "release:" not in notes_val_tmp or (v not in notes_val_tmp and p not in notes_val_tmp):
+                            if "release" not in notes_val_tmp or (v not in notes_val_tmp and p not in notes_val_tmp):
                                 try:
                                     for i, h in enumerate(self.headers):
                                         if "comment" in h.lower() or "note" in h.lower():
                                             widget = self.widgets_by_col.get(i)
                                             if isinstance(widget, __import__('tkinter').Text):
-                                                current_text = widget.get("1.0", "end").strip()
-                                                new_text = f"{current_text}\n\n{new_release}".strip()
+                                                current_text = widget.get("1.0", "end-1c").strip()
+                                                new_text = f"{current_text}\n{new_release}".strip()
                                                 widget.delete("1.0", "end")
                                                 widget.insert("1.0", new_text)
                                             break
@@ -1177,14 +1177,14 @@ class RunsheetEditorWindow(tk.Toplevel):
                             except: pass
                             
                             # if no release in notes at all, or if this specific one is missing
-                            if "release:" not in notes_val_tmp or (v not in notes_val_tmp and p not in notes_val_tmp):
+                            if "release" not in notes_val_tmp or (v not in notes_val_tmp and p not in notes_val_tmp):
                                 try:
                                     for i, h in enumerate(self.headers):
                                         if "comment" in h.lower() or "note" in h.lower():
                                             widget = self.widgets_by_col.get(i)
                                             if isinstance(widget, __import__('tkinter').Text):
-                                                current_text = widget.get("1.0", "end").strip()
-                                                new_text = f"{current_text}\n\n{new_release}".strip()
+                                                current_text = widget.get("1.0", "end-1c").strip()
+                                                new_text = f"{current_text}\n{new_release}".strip()
                                                 widget.delete("1.0", "end")
                                                 widget.insert("1.0", new_text)
                                             break
@@ -1454,8 +1454,8 @@ class RunsheetEditorWindow(tk.Toplevel):
                     cell.value = val
                 
             elif isinstance(widget, tk.Text):
-                # Dump text and tags
-                dump = widget.dump("1.0", tk.END, text=True, tag=True)
+                # Dump text and tags up to "end-1c" to ignore tk.Text synthetic trailing newline
+                dump = widget.dump("1.0", "end-1c", text=True, tag=True)
                 
                 # First, build a single full string with bold tags embedded
                 full_text = ""
@@ -1469,10 +1469,9 @@ class RunsheetEditorWindow(tk.Toplevel):
                             current_tags.remove(item[1])
                             if item[1] == 'bold': full_text += '[[BOLD_END]]'
                     elif item[0] == 'text':
-                        txt = item[1]
-                        if item == dump[-1] and txt == '\n':
-                            continue # Ignore trailing newline added by tk.Text
-                        full_text += txt
+                        full_text += item[1]
+                
+                full_text = full_text.rstrip('\r\n')
                 
                 # Apply auto-formatting to the FULL text
                 header_name = self.headers[i].lower()
