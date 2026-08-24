@@ -384,6 +384,77 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.listbox.delete(0, tk.END)
         self.row_indices = []
         self.row_warnings = {}
+        
+        # Pre-scan for volume and page sequence order errors
+        eff_date_col = -1
+        file_date_col = -1
+        for i, h in enumerate(self.headers):
+            hl = h.lower()
+            if "eff" in hl and "date" in hl: eff_date_col = i
+            elif "file" in hl and "date" in hl: file_date_col = i
+            elif "date" in hl and eff_date_col == -1: eff_date_col = i
+
+        seq_row_meta = []
+        for r_idx in range(3, self.ws.max_row + 1):
+            r = self.ws[r_idx]
+            if not any(cell.value for cell in r): continue
+            
+            btype = str(r[1].value or "").strip()
+            v_val = str(r[2].value or "").strip()
+            p_val = str(r[3].value or "").strip()
+            
+            eff_dt = str(r[eff_date_col].value or "").strip() if eff_date_col != -1 and eff_date_col < len(r) else ""
+            file_dt = str(r[file_date_col].value or "").strip() if file_date_col != -1 and file_date_col < len(r) else ""
+            
+            p_num = None
+            import re
+            m_pg = re.search(r'\d+', p_val)
+            if m_pg:
+                p_num = int(m_pg.group(0))
+                
+            seq_row_meta.append({
+                "row_idx": r_idx,
+                "btype": btype,
+                "vol": v_val,
+                "page": p_val,
+                "page_num": p_num,
+                "eff_date": eff_dt,
+                "file_date": file_dt
+            })
+
+        seq_warnings_by_row = {}
+        for i in range(len(seq_row_meta)):
+            item_a = seq_row_meta[i]
+            if not item_a["vol"] or item_a["page_num"] is None: continue
+            
+            for j in range(i + 1, len(seq_row_meta)):
+                item_b = seq_row_meta[j]
+                if not item_b["vol"] or item_b["page_num"] is None: continue
+                
+                # Must be same volume
+                if item_a["vol"] == item_b["vol"]:
+                    if item_a["btype"] and item_b["btype"] and item_a["btype"].upper() != item_b["btype"].upper():
+                        continue
+                        
+                    # Same effective date or same file date
+                    same_eff = item_a["eff_date"] and item_b["eff_date"] and (item_a["eff_date"] == item_b["eff_date"])
+                    same_file = item_a["file_date"] and item_b["file_date"] and (item_a["file_date"] == item_b["file_date"])
+                    
+                    if same_eff or same_file:
+                        if item_a["page_num"] > item_b["page_num"]:
+                            v = item_a["vol"]
+                            p_a = item_a["page"]
+                            p_b = item_b["page"]
+                            rb_idx = item_b["row_idx"]
+                            ra_idx = item_a["row_idx"]
+                            d_str = item_a["eff_date"] if same_eff else item_a["file_date"]
+                            
+                            w_a = f"Page sequence error: Vol {v} Pg {p_a} placed before lower Pg {p_b} (Row {rb_idx}) with same date ({d_str})"
+                            w_b = f"Page sequence error: Vol {v} Pg {p_b} placed after higher Pg {p_a} (Row {ra_idx}) with same date ({d_str})"
+                            
+                            seq_warnings_by_row.setdefault(item_a["row_idx"], []).append(w_a)
+                            seq_warnings_by_row.setdefault(item_b["row_idx"], []).append(w_b)
+
         for row_idx in range(3, self.ws.max_row + 1):
             row = self.ws[row_idx]
             inst_type = str(row[0].value).strip() if row[0].value else ""
@@ -456,6 +527,12 @@ class RunsheetEditorWindow(tk.Toplevel):
             inst_lower = inst_type.lower()
             needs_warning = False
             warnings = []
+            
+            # Add sequence warnings if any
+            if row_idx in seq_warnings_by_row:
+                for w in seq_warnings_by_row[row_idx]:
+                    warnings.append(w)
+                    needs_warning = True
             
             if "--- Original ---" in notes_val_raw:
                 needs_warning = True
