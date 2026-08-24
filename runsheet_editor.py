@@ -1801,6 +1801,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                     if not vol_col: vol_col = 3
                     if not pg_col: pg_col = 4
                             
+                    jumped = False
                     for row_idx in range(3, self.ws.max_row + 1):
                         r_vol = str(self.ws.cell(row=row_idx, column=vol_col).value or "").strip().lstrip('0') or '0'
                         r_pg = str(self.ws.cell(row=row_idx, column=pg_col).value or "").strip().lstrip('0') or '0'
@@ -1819,9 +1820,13 @@ class RunsheetEditorWindow(tk.Toplevel):
                                 self.listbox.selection_set(lb_idx)
                                 self.listbox.see(lb_idx)
                                 self.on_select(None)
+                                jumped = True
                             break
+                            
+                    if jumped:
+                        return
                     
-                    # 2. Try to open local document PDF
+                    # 2. Try to open local document PDF only if row is not in current runsheet
                     import glob, subprocess
                     found_doc = None
                     
