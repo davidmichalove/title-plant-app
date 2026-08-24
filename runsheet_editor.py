@@ -494,16 +494,27 @@ class RunsheetEditorWindow(tk.Toplevel):
                             seq_warnings_by_row.setdefault(item_a["row_idx"], []).append(w_a)
                             seq_warnings_by_row.setdefault(item_b["row_idx"], []).append(w_b)
 
-        for row_idx in range(3, self.ws.max_row + 1):
+        last_row_idx = 2
+        for r_idx in range(3, self.ws.max_row + 1):
+            if any(cell.value is not None and str(cell.value).strip() != "" for cell in self.ws[r_idx]):
+                last_row_idx = r_idx
+
+        for row_idx in range(3, last_row_idx + 1):
             row = self.ws[row_idx]
+            
+            # Check for completely empty row/line
+            if not any(cell.value is not None and str(cell.value).strip() != "" for cell in row):
+                disp = f"⚠️ ⚪ Row {row_idx}: [EMPTY LINE / BLANK ROW]"
+                self.row_warnings[str(row_idx)] = ["Empty line in runsheet (row contains no data)"]
+                self.listbox.insert(tk.END, disp)
+                self.listbox.itemconfig(tk.END, {'bg': '#ffeeee', 'fg': 'red'})
+                self.row_indices.append(row_idx)
+                continue
+
             inst_type = str(row[0].value).strip() if row[0].value else ""
             book_type = str(row[1].value).strip() if row[1].value else ""
             vol = str(row[2].value).strip() if row[2].value else ""
             page = str(row[3].value).strip() if row[3].value else ""
-            
-            # If the row is completely empty, skip it
-            if not any(cell.value for cell in row):
-                continue
                 
             disp = ""
             if book_type: disp += f"{book_type} "
