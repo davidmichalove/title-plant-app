@@ -3904,12 +3904,19 @@ end tell'''
         count_lbl = ttk.Label(toolbar, text="Selected: 0 of 0", font=("Helvetica", 11, "bold"), foreground=count_color)
         count_lbl.pack(side=tk.RIGHT, padx=5)
         
+        import textwrap
+        
+        # Style configuration with generous row height for multi-line wrapped text
+        tree_style = ttk.Style(dialog)
+        tree_style.configure("NameSearch.Treeview", rowheight=44, font=("Helvetica", 11))
+        tree_style.configure("NameSearch.Treeview.Heading", font=("Helvetica", 11, "bold"))
+
         # Treeview Frame
         tree_frame = ttk.Frame(dialog, padding=(12, 4))
         tree_frame.pack(fill=tk.BOTH, expand=True)
         
         cols = ("sel", "type", "volpg", "date", "grantor", "grantee", "legal")
-        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended")
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended", style="NameSearch.Treeview")
         
         tree.heading("sel", text="[ ✓ ]")
         tree.heading("type", text="Document Type")
@@ -3917,15 +3924,15 @@ end tell'''
         tree.heading("date", text="Recorded Date")
         tree.heading("grantor", text="Grantor / Direct")
         tree.heading("grantee", text="Grantee / Reverse")
-        tree.heading("legal", text="Legal / Notes")
+        tree.heading("legal", text="Legal / Description Notes")
         
-        tree.column("sel", width=50, minwidth=40, anchor=tk.CENTER)
-        tree.column("type", width=120, minwidth=80, anchor=tk.W)
-        tree.column("volpg", width=85, minwidth=70, anchor=tk.CENTER)
-        tree.column("date", width=90, minwidth=75, anchor=tk.CENTER)
-        tree.column("grantor", width=180, minwidth=100, anchor=tk.W)
-        tree.column("grantee", width=180, minwidth=100, anchor=tk.W)
-        tree.column("legal", width=280, minwidth=150, anchor=tk.W)
+        tree.column("sel", width=50, minwidth=40, anchor=tk.CENTER, stretch=False)
+        tree.column("type", width=120, minwidth=85, anchor=tk.W, stretch=False)
+        tree.column("volpg", width=85, minwidth=70, anchor=tk.CENTER, stretch=False)
+        tree.column("date", width=90, minwidth=75, anchor=tk.CENTER, stretch=False)
+        tree.column("grantor", width=180, minwidth=110, anchor=tk.W, stretch=False)
+        tree.column("grantee", width=180, minwidth=110, anchor=tk.W, stretch=False)
+        tree.column("legal", width=380, minwidth=220, anchor=tk.W, stretch=True)
         
         sb_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
         sb_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=tree.xview)
@@ -3941,6 +3948,32 @@ end tell'''
         tree.tag_configure("odd", background=bg_odd, foreground=fg_text)
         tree.tag_configure("checked", background=bg_checked, foreground=fg_checked)
         
+        # Details / Legal Notes Inspector Panel
+        details_frame = ttk.LabelFrame(dialog, text="Document Details & Legal Description", padding=(8, 6))
+        details_frame.pack(fill=tk.X, padx=12, pady=(2, 6))
+        
+        details_text = tk.Text(details_frame, height=3, wrap=tk.WORD, font=("Helvetica", 11), bg=bg_odd, fg=fg_text, relief=tk.FLAT, padx=6, pady=4, highlightthickness=0)
+        details_text.pack(fill=tk.X, expand=True)
+        details_text.insert("1.0", "💡 Select any document in the table above to view complete legal notes and details.")
+        details_text.config(state=tk.DISABLED)
+        
+        def on_tree_select(event=None):
+            sel = tree.selection()
+            if not sel: return
+            try:
+                idx = int(sel[0])
+                if idx < len(records):
+                    inst, dtype, volpg, date, grantor, grantee, legal = records[idx]
+                    details_text.config(state=tk.NORMAL)
+                    details_text.delete("1.0", tk.END)
+                    details_text.insert(tk.END, f"[{dtype}]  Vol/Pg: {volpg}   |   Recorded: {date}   |   Instrument #: {inst or 'N/A'}\n")
+                    details_text.insert(tk.END, f"Grantor: {grantor or 'N/A'}   -->   Grantee: {grantee or 'N/A'}\n")
+                    details_text.insert(tk.END, f"Legal Notes: {legal or 'None'}")
+                    details_text.config(state=tk.DISABLED)
+            except: pass
+            
+        tree.bind("<<TreeviewSelect>>", on_tree_select)
+        
         def refresh_table(*args):
             query = filter_var.get().lower().strip()
             tree.delete(*tree.get_children())
@@ -3955,7 +3988,8 @@ end tell'''
                 check_mark = "[ ✓ ]" if is_checked else "[   ]"
                 tag = "checked" if is_checked else ("even" if visible_count % 2 == 0 else "odd")
                 
-                tree.insert("", tk.END, iid=str(idx), values=(check_mark, dtype, volpg, date, grantor, grantee, legal), tags=(tag,))
+                wrapped_legal = textwrap.fill(legal, width=48) if legal else ""
+                tree.insert("", tk.END, iid=str(idx), values=(check_mark, dtype, volpg, date, grantor, grantee, wrapped_legal), tags=(tag,))
                 visible_count += 1
                 
             count_lbl.config(text=f"Selected: {len(selected_keys)} of {len(records)} ({visible_count} visible)")
