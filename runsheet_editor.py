@@ -2876,45 +2876,45 @@ class RunsheetEditorWindow(tk.Toplevel):
             return ""
             
         prior_ref_clean = re.sub(r'^(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*', '', prior_ref_raw, flags=re.IGNORECASE).strip()
-        prior_ref_clean = prior_ref_clean.rstrip('.')
         
-        # Check standard format: DR 554/912 or DR 554-912
-        m_std = re.search(r'\b(DR|OR|MR|LR|PR|WR|MISC)\s+(\d+)[/-](\d+)\b', prior_ref_clean, re.IGNORECASE)
-        if m_std:
-            btype = m_std.group(1).upper()
-            vol = m_std.group(2)
-            pg = m_std.group(3)
-            return f"Prior Ref: {btype} {vol}/{pg}"
-
-        # Named book: Deed Book 554, Page 912 or Official Records 101, Page 345
-        m_named = re.search(r'\b(Deed\s*(?:Book|Record|Vol)?|Official\s*Records?|Mortgage\s*(?:Book|Record|Vol)?|Lease\s*(?:Book|Record|Vol)?)\s*[:.]?\s*(?:Vol(?:ume)?\.?\s*)?(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', prior_ref_clean, re.IGNORECASE)
-        if m_named:
-            bname = m_named.group(1).lower()
-            vol = m_named.group(2)
-            pg = m_named.group(3)
+        # 1. Named book: Deed Book 554, Page 912 -> DR 554/912
+        def repl_named(m):
+            bname = m.group(1).lower()
+            vol = m.group(2)
+            pg = m.group(3)
             btype = "DR"
             if "official" in bname: btype = "OR"
             elif "mortgage" in bname: btype = "MR"
             elif "lease" in bname: btype = "LR"
-            return f"Prior Ref: {btype} {vol}/{pg}"
-
-        # Generic Vol 554, Page 912 or Volume 4, Page 3
-        m_vol_pg = re.search(r'\b(?:Vol(?:ume)?\.?|Bk\.?|Book)\s*(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', prior_ref_clean, re.IGNORECASE)
-        if m_vol_pg:
-            vol = m_vol_pg.group(1)
-            pg = m_vol_pg.group(2)
+            return f"{btype} {vol}/{pg}"
+        prior_ref_clean = re.sub(r'\b(Deed\s*(?:Book|Record|Vol)?|Official\s*Records?|Mortgage\s*(?:Book|Record|Vol)?|Lease\s*(?:Book|Record|Vol)?)\s*[:.]?\s*(?:Vol(?:ume)?\.?\s*)?(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', repl_named, prior_ref_clean, flags=re.IGNORECASE)
+        
+        # 2. Generic Vol 554, Page 912 -> DR 554/912
+        def repl_vol_pg(m):
+            vol = m.group(1)
+            pg = m.group(2)
             btype = self.find_book_type_for_vol_pg(vol, pg)
-            return f"Prior Ref: {btype} {vol}/{pg}"
+            return f"{btype} {vol}/{pg}"
+        prior_ref_clean = re.sub(r'\b(?:Vol(?:ume)?\.?|Bk\.?|Book)\s*(\d+)[,\s]+(?:Page|Pg|p\.?)\s*(\d+)\b', repl_vol_pg, prior_ref_clean, flags=re.IGNORECASE)
+        
+        # 3. Standard & bare references: DR 554/912, OR 101-202, or bare 554/912
+        def repl_ref(m):
+            btype = m.group(1)
+            vol = m.group(2)
+            pg = m.group(3)
+            if btype:
+                btype = btype.strip().upper()
+            else:
+                btype = self.find_book_type_for_vol_pg(vol, pg)
+            return f"{btype} {vol}/{pg}"
+        prior_ref_clean = re.sub(r'\b(DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB)?\s*(\d{1,4})[/-](\d{1,4})\b', repl_ref, prior_ref_clean, flags=re.IGNORECASE)
 
-        # Bare numbers: 554/912 or 554-912
-        m_bare = re.search(r'\b(\d{1,4})[/-](\d{1,4})\b', prior_ref_clean)
-        if m_bare:
-            vol = m_bare.group(1)
-            pg = m_bare.group(2)
-            btype = self.find_book_type_for_vol_pg(vol, pg)
-            return f"Prior Ref: {btype} {vol}/{pg}"
+        # Clean duplicate adjacent book identifiers
+        dup_book_pattern = r'\b(DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|PB)\s+(?=(?:DR|OR|MR|LR|PR|PA|WR|MISC|DB|MB|PB)\b)'
+        while re.search(dup_book_pattern, prior_ref_clean, flags=re.IGNORECASE):
+            prior_ref_clean = re.sub(dup_book_pattern, '', prior_ref_clean, flags=re.IGNORECASE)
 
-        return f"Prior Ref: {prior_ref_clean}"
+        return f"Prior Ref: {prior_ref_clean.strip()}"
 
     def apply_initial_formatting_pipeline(self, txt, inst_type=""):
         import re
@@ -3134,34 +3134,28 @@ class RunsheetEditorWindow(tk.Toplevel):
             rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?[^\S\r\n]*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
             txt = re.sub(rel_pattern, format_released, txt, flags=re.IGNORECASE)
             
-            # Deduplicate consecutive identical lines (e.g. repeated Full satisfaction statements)
-            clean_lines = []
-            for line in txt.splitlines():
-                cl = line.strip()
-                if not clean_lines or cl != clean_lines[-1].strip() or not cl:
-                    clean_lines.append(line)
-            txt = "\n".join(clean_lines)
+            # Deduplicate specifically repeated Full satisfaction statements
+            txt = re.sub(r'(?:Full\s+satisfaction\.?\s*Clears\s+lien\s+from\s+the\s+property\s+title\.?\s*\n?){2,}', 'Full satisfaction. Clears lien from the property title.\n', txt, flags=re.IGNORECASE)
 
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Releases mortgage recorded in)', r'\1\n\2', txt)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Release:)', r'\1\n\2', txt)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*((?:No\s+dower\s+mentioned|Dower\s+(?:rights\s+)?released|Dower\s+not\s+stated)\.?)', r'\1\n\2', txt, flags=re.IGNORECASE)
-            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Prior Ref:)', r'\1\n\2', txt)
             txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
             
-            # Prior Ref normalization in comments
+            # Prior Ref normalization in comments (anchored to line start so text on subsequent lines is never mangled)
             def repl_prior_ref_match(m):
-                return self.normalize_prior_ref_string(m.group(0).strip())
-            txt = re.sub(r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*[^\n\.;]+', repl_prior_ref_match, txt, flags=re.IGNORECASE)
-            txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Prior Ref:)', r'\1\n\2', txt)
-            txt = re.sub(r'(Release:\s*(?:[A-Z]+\s*)?\d+[-/]\d+)\.$', r'\1', txt)
+                prefix = "\n" if m.group(0).startswith("\n") else ""
+                return prefix + self.normalize_prior_ref_string(m.group(0).strip())
+            txt = re.sub(r'(?:^|\n)[^\S\r\n]*(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*[^\n\r]*', repl_prior_ref_match, txt, flags=re.IGNORECASE)
 
             # Separate main comment text from Original/Gemini Draft notes blocks
             parts = re.split(r'(\n*---\s*(?:Original|Gemini Draft)\s*---.*)', txt, flags=re.DOTALL)
             main_text = parts[0]
             extra_text = "".join(parts[1:]) if len(parts) > 1 else ""
 
-            # Ensure all lines in the main comment block have NO blank lines (single \n everywhere)
-            main_text = re.sub(r'\n{2,}', '\n', main_text).strip()
+            # Ensure all lines in main comment block are preserved with clean single newlines
+            main_lines = [l.strip() for l in main_text.splitlines() if l.strip()]
+            main_text = "\n".join(main_lines)
 
             if extra_text:
                 txt = f"{main_text}\n\n{extra_text.strip()}"
