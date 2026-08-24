@@ -132,11 +132,12 @@ def normalize_prior_ref_text(text, parcel_dir=None):
     pattern = r'(?:Prior\s*(?:deed\s*)?references?|Prior\s*Ref)\s*[:.]?\s*([^\n\.;]+)'
     return re.sub(pattern, repl_prior_ref, text, flags=re.IGNORECASE)
 
-def normalize_gemini_comment(text, parcel_dir=None):
+def normalize_gemini_comment(text, inst_type="", parcel_dir=None):
     if not text: return text
     
     # 1. Release of Mortgage / Satisfaction formatting
-    if re.search(r'(?:release|satisfaction)\s+(?:of\s+)?mortgage|releases\s+mortgage', text, re.IGNORECASE):
+    is_rel_row = "release" in inst_type.lower() or "satisfaction" in inst_type.lower() or "sat" in inst_type.lower() or "rel" in inst_type.lower() or "discharge" in inst_type.lower() or "cancel" in inst_type.lower()
+    if is_rel_row or re.search(r'(?:release|satisfaction)\s+(?:of\s+)?mortgage|releases\s+mortgage', text, re.IGNORECASE):
         def repl_rel(m):
             btype = m.group(1) or ""
             vol = m.group(2)
@@ -147,7 +148,7 @@ def normalize_gemini_comment(text, parcel_dir=None):
                 btype = btype.upper()
             return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
 
-        rel_pattern = r'(?:Releases?\s+(?:of\s+)?mortgage\s+(?:recorded\s+in\s+|in\s+)?|Releases\s+recorded\s+in\s+)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?([A-Za-z]+)?\s*[:.]?\s*(\d+)[,\s/-]+(?:Page|Pg|p\.?)?\s*(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+        rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?([A-Za-z]+)?\s*[:.]?\s*(\d+)[,\s/-]+(?:Page|Pg|p\.?)?\s*(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
         text = re.sub(rel_pattern, repl_rel, text, flags=re.IGNORECASE)
 
     # 2. Normalize Prior References
@@ -405,7 +406,8 @@ def batch_generate_runsheet(api_key, parcel_dir, progress_callback=None, model="
 
         res_data, err = analyze_document_with_gemini(api_key, target_pdf, row_meta, parcel_dir=parcel_dir, model=model)
         if res_data and isinstance(res_data, dict):
-            gemini_comm = normalize_gemini_comment(res_data.get("comments", "").strip(), parcel_dir=parcel_dir)
+            inst_type = res_data.get("instrument_type") or row_meta.get("instrument", "")
+            gemini_comm = normalize_gemini_comment(res_data.get("comments", "").strip(), inst_type=inst_type, parcel_dir=parcel_dir)
             if "comments" in col_map and gemini_comm:
                 raw_existing = str(ws.cell(row=r_idx, column=col_map["comments"]).value or "").strip()
                 

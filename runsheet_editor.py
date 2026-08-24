@@ -2945,7 +2945,8 @@ class RunsheetEditorWindow(tk.Toplevel):
         txt = re.sub(r'(?:^|(?<=\.))\s*((?:EXCEPTING|EXCEPTIONS?|RESERVES?|RESERVATIONS?|RESERVING)\b[^.\n]*(?:\.|$))', format_own_line, txt, flags=re.IGNORECASE)
 
         # RELEASES / SATISFACTIONS
-        if re.search(r'(?:release|satisfaction)\s+(?:of\s+)?mortgage|releases\s+mortgage', txt, re.IGNORECASE) or "release" in inst_type.lower() or "satisfaction" in inst_type.lower():
+        is_rel_row = "release" in inst_type.lower() or "satisfaction" in inst_type.lower() or "sat" in inst_type.lower() or "rel" in inst_type.lower() or "discharge" in inst_type.lower() or "cancel" in inst_type.lower()
+        if is_rel_row or re.search(r'(?:release|satisfaction)\s+(?:of\s+)?mortgage|releases\s+mortgage', txt, re.IGNORECASE):
             def repl_rel(m):
                 btype = m.group(1) or ""
                 vol = m.group(2)
@@ -2957,7 +2958,7 @@ class RunsheetEditorWindow(tk.Toplevel):
                     btype = btype.upper()
                 return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
 
-            rel_pattern = r'(?:Releases?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
             txt = re.sub(rel_pattern, repl_rel, txt, flags=re.IGNORECASE)
 
         # ARTI
@@ -3077,18 +3078,28 @@ class RunsheetEditorWindow(tk.Toplevel):
         if "comments" in header_name:
             import re
             
-            # Dynamic Dower Check (Runs on save to catch Instrument type changes)
+            # Dynamic Dower / Instrument Check (Runs on save to catch Instrument type changes)
             inst_type = ""
             try:
                 for i, h in enumerate(self.headers):
-                    if h.lower() == 'instrument':
+                    hl = h.lower()
+                    if "inst" in hl or "type" in hl:
                         widget = self.widgets_by_col.get(i)
                         if widget and hasattr(widget, 'get'):
-                            inst_type = widget.get().lower()
+                            inst_type = widget.get().strip().lower()
                         break
             except: pass
             
-            is_dower_applicable = ("deed" in inst_type or "mortgage" in inst_type) and "release" not in inst_type and "satisfaction" not in inst_type
+            if not inst_type and getattr(self, 'current_row_idx', None):
+                for i, h in enumerate(self.headers):
+                    hl = h.lower()
+                    if "inst" in hl or "type" in hl:
+                        inst_type = str(self.ws.cell(row=self.current_row_idx, column=i+1).value or "").strip().lower()
+                        break
+
+            is_release_inst = "release" in inst_type or "satisfaction" in inst_type or "sat" in inst_type or "rel" in inst_type or "discharge" in inst_type or "cancel" in inst_type
+            
+            is_dower_applicable = ("deed" in inst_type or "mortgage" in inst_type) and not is_release_inst
             text_without_original = txt.split("--- Original ---")[0]
             if is_dower_applicable and not re.search(r'(?i)dower', text_without_original):
                 if "--- Original ---" in txt:
@@ -3105,12 +3116,12 @@ class RunsheetEditorWindow(tk.Toplevel):
                     book = self.find_book_type_for_vol_pg(vol, pg)
                     if book == "DR": book = "MR"
                 
-                if "release" in inst_type or "satisfaction" in inst_type or "releases mortgage" in txt.lower():
+                if is_release_inst or "releases mortgage" in txt.lower() or "satisfaction" in txt.lower() or "release of mortgage" in txt.lower():
                     return f'Releases mortgage recorded in {book} {vol}/{pg}\nFull satisfaction. Clears lien from the property title.'
                 else:
                     return f'Release: {book} {vol}/{pg}'
                     
-            rel_pattern = r'(?:Release(?:s|d)?\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
             txt = re.sub(rel_pattern, format_released, txt, flags=re.IGNORECASE)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Releases mortgage recorded in)', r'\1\n\2', txt)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Release:)', r'\1\n\2', txt)
