@@ -148,8 +148,15 @@ def normalize_gemini_comment(text, inst_type="", parcel_dir=None):
                 btype = btype.upper()
             return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
 
-        rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?([A-Za-z]+)?\s*[:.]?\s*(\d+)[,\s/-]+(?:Page|Pg|p\.?)?\s*(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+        rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?([A-Za-z]+)?\s*[:.]?\s*(\d+)[,\s/-]+(?:Page|Pg|p\.?)?\s*(\d+)(?:(?:\.|\n|[^\S\r\n])*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)*'
         text = re.sub(rel_pattern, repl_rel, text, flags=re.IGNORECASE)
+        
+        clean_lines = []
+        for line in text.splitlines():
+            cl = line.strip()
+            if not clean_lines or cl != clean_lines[-1].strip() or not cl:
+                clean_lines.append(line)
+        text = "\n".join(clean_lines)
 
     # 2. Normalize Prior References
     text = normalize_prior_ref_text(text, parcel_dir=parcel_dir)

@@ -2963,8 +2963,15 @@ class RunsheetEditorWindow(tk.Toplevel):
                     btype = btype.upper()
                 return f"Releases mortgage recorded in {btype} {vol}/{pg}\nFull satisfaction. Clears lien from the property title."
 
-            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?\s*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:(?:\.|\n|[^\S\r\n])*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)*'
             txt = re.sub(rel_pattern, repl_rel, txt, flags=re.IGNORECASE)
+            
+            clean_lines = []
+            for line in txt.splitlines():
+                cl = line.strip()
+                if not clean_lines or cl != clean_lines[-1].strip() or not cl:
+                    clean_lines.append(line)
+            txt = "\n".join(clean_lines)
 
         # ARTI
         if "ARTI\n" not in txt:
@@ -3126,8 +3133,17 @@ class RunsheetEditorWindow(tk.Toplevel):
                 else:
                     return f'Release: {book} {vol}/{pg}'
                     
-            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:\.?[^\S\r\n]*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)?'
+            rel_pattern = r'(?:(?:Release(?:s|d)?|Satisfaction|Satisfies|Discharge|Discharges|Cancels?)\s*(?:of\s*)?(?:mortgage\s*)?(?:recorded\s*)?(?:in\s*)?(?:by\s*)?:?\s*(?:SEE\s*)?)(?:(?:Book|Vol(?:ume)?\.?|Record)\s*)?(DR|OR|MR|LR|PR|PA|WR|MISC|\.)?\s*(\d+)[-/\s,]+(?:PAGE\s*|PG\s*|p\.?\s*)?(\d+)(?:(?:\.|\n|[^\S\r\n])*(?:Full\s+satisfaction\.?\s*)?(?:Clears\s+lien\s+from\s+the\s+property\s+title\.?)?)*'
             txt = re.sub(rel_pattern, format_released, txt, flags=re.IGNORECASE)
+            
+            # Deduplicate consecutive identical lines (e.g. repeated Full satisfaction statements)
+            clean_lines = []
+            for line in txt.splitlines():
+                cl = line.strip()
+                if not clean_lines or cl != clean_lines[-1].strip() or not cl:
+                    clean_lines.append(line)
+            txt = "\n".join(clean_lines)
+
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Releases mortgage recorded in)', r'\1\n\2', txt)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(Release:)', r'\1\n\2', txt)
             txt = re.sub(r'([^\n\u200B])[^\S\r\n]*(No dower mentioned\.)', r'\1\n\2', txt)
