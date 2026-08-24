@@ -4513,7 +4513,9 @@ end tell'''
         ttk.Entry(frame, textvariable=start_date_var).grid(row=0, column=1)
         
         ttk.Label(frame, text="End Date (MM/DD/YYYY):").grid(row=1, column=0, padx=5, pady=5)
-        end_date_var = tk.StringVar(value="01/01/2050")
+        from datetime import datetime
+        today_str = datetime.now().strftime("%m/%d/%Y")
+        end_date_var = tk.StringVar(value=today_str)
         ttk.Entry(frame, textvariable=end_date_var).grid(row=1, column=1, pady=5)
         
         def on_search():
