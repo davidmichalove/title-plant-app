@@ -21,7 +21,7 @@ def generate_odnr_map(parcel_num, output_dir):
         user_data_dir = os.path.join(os.path.expanduser("~"), ".odnr_playwright_cache")
         browser = p.chromium.launch_persistent_context(
             user_data_dir=user_data_dir,
-            headless=False,
+            headless=True,
             viewport={'width': 1440, 'height': 900},
             args=['--start-maximized']
         )

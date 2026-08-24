@@ -8,7 +8,7 @@ def generate_gis_map(parcel_num, output_dir):
         cache_dir = os.path.join(output_dir, "playwright_cache")
         context = p.chromium.launch_persistent_context(
             user_data_dir=cache_dir,
-            headless=False,
+            headless=True,
             viewport={'width': 1440, 'height': 900}, # Scaled down to match a typical MacBook Air screen!
             ignore_https_errors=True
         )

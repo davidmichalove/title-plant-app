@@ -2293,15 +2293,6 @@ class AutomatorApp:
             if hasattr(self, 'next_page_btn'):
                 self.next_page_btn.config(state=tk.NORMAL)
             
-            import subprocess
-            import sys
-            if sys.platform == "darwin":
-                subprocess.Popen(["open", dest_file])
-            elif sys.platform == "win32":
-                os.startfile(dest_file)
-            else:
-                subprocess.Popen(["xdg-open", dest_file])
-            
             return True
             
         except Exception as e:
@@ -4091,19 +4082,6 @@ end tell'''
                 
                 browser.close()
                 self.refresh_viewer_list()
-                
-                def auto_open_docket(p):
-                    try:
-                        import sys, subprocess, os
-                        if sys.platform == "darwin":
-                            subprocess.Popen(["open", p])
-                        elif sys.platform == "win32":
-                            os.startfile(p)
-                        else:
-                            subprocess.Popen(["xdg-open", p])
-                    except Exception as ex:
-                        self.log(f"Auto-open error: {ex}")
-                self.root.after(150, lambda p=target_path: auto_open_docket(p))
         except Exception as e:
             self.log(f"Error in Kofile scraper: {e}")
 
