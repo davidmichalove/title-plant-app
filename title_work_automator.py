@@ -4196,8 +4196,6 @@ class KofileStreamingProgressWindow(tk.Toplevel):
                 self.log("CourtView Name Search completed.")
         except Exception as e:
             self.log(f"CourtView Name Search failed: {e}")
-            import traceback
-            traceback.print_exc()
 
     def _fetch_kofile_single_doc_worker(self, vol_val, pg_val, doc_type, target_dir, stagger_sec=0.0, last_name=""):
         import time
@@ -4217,7 +4215,7 @@ class KofileStreamingProgressWindow(tk.Toplevel):
 
                 try:
                     accept_btn = page.frame_locator("iframe[name='bodyframe']").locator("input#accept")
-                    accept_btn.wait_for(state="visible", timeout=10000)
+                    accept_btn.wait_for(state="visible", timeout=8000)
                     accept_btn.click()
                     page.wait_for_load_state('domcontentloaded')
                     page.wait_for_timeout(800)
@@ -4272,10 +4270,10 @@ class KofileStreamingProgressWindow(tk.Toplevel):
                             return docFrame && docFrame.contentWindow && typeof docFrame.contentWindow.getNumPages === 'function' && docFrame.contentWindow.getNumPages() > 0;
                         } catch (e) { return false; }
                     }
-                """, timeout=40000)
+                """, timeout=45000)
 
                 clean_type = "".join(c for c in doc_type if c.isalnum() or c in " _-").strip() or "DOC"
-                with page.expect_download(timeout=50000) as download_info:
+                with page.expect_download(timeout=60000) as download_info:
                     page.frame(name='bodyframe').evaluate("""
                         var instrId = document.getElementById("documentFrame").contentWindow.getInstrumentId();
                         var numPages = document.getElementById("documentFrame").contentWindow.getNumPages();
@@ -4285,6 +4283,21 @@ class KofileStreamingProgressWindow(tk.Toplevel):
                 download = download_info.value
                 out_file = os.path.join(target_dir, f"{vol_val}-{pg_val} {clean_type}.pdf")
                 download.save_as(out_file)
+
+                if out_file.lower().endswith('.pdf'):
+                    try:
+                        import fitz
+                        doc = fitz.open(out_file)
+                        catalog = doc.pdf_catalog()
+                        doc.xref_set_key(catalog, "OutputIntents", "null")
+                        doc.xref_set_key(catalog, "Metadata", "null")
+                        tmp_path = out_file + ".tmp"
+                        doc.save(tmp_path, incremental=False, deflate=True)
+                        doc.close()
+                        import shutil
+                        shutil.move(tmp_path, out_file)
+                    except Exception: pass
+
                 browser.close()
                 return True
             except Exception as e:
@@ -4292,14 +4305,14 @@ class KofileStreamingProgressWindow(tk.Toplevel):
                 except: pass
                 return False
 
-    def _fetch_kofile_deed_background(self, vol_val, pg_val, parcel_num, doc_type="ALL", custom_docs_dir=None, auto_open=False):
+    def _fetch_kofile_deed_background(self, vol_val, pg_val, parcel_num, doc_type="ALL", custom_docs_dir=None, auto_open=True):
         try:
-            self.log(f"Starting Kofile scraper for Volume {vol_val}, Page {pg_val} (Type: {doc_type})...")
+            self.log(f"⚡ Starting Kofile direct fetch for Volume {vol_val}, Page {pg_val} ({doc_type})...")
             
             from playwright.sync_api import sync_playwright
             import time
             import os
-            import glob
+            import re
             
             pid_dir = self.get_parcel_dir(parcel_num)
             docs_dir = custom_docs_dir if custom_docs_dir else os.path.join(pid_dir, "DOCS")
@@ -4313,236 +4326,152 @@ class KofileStreamingProgressWindow(tk.Toplevel):
                 page = context.new_page()
 
                 self.log("Navigating to Belmont County Recorder...")
-                page.goto("https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH")
+                page.goto("https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH", timeout=45000)
                 
                 self.log("Logging in as guest...")
                 page.locator("input[value='Login as Guest']").click(no_wait_after=True)
                 page.wait_for_load_state('domcontentloaded')
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(800)
                 
-                self.log("Accepting disclaimer...")
-                page.frame_locator("iframe[name='bodyframe']").locator("input#accept").click()
-                page.wait_for_load_state('domcontentloaded')
-                page.wait_for_timeout(2000)
-                
-                self.log("Clicking Search Public Records...")
-                page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first.click()
-                page.wait_for_timeout(3000)
+                try:
+                    accept_btn = page.frame_locator("iframe[name='bodyframe']").locator("input#accept")
+                    accept_btn.wait_for(state="visible", timeout=8000)
+                    accept_btn.click()
+                    page.wait_for_load_state('domcontentloaded')
+                    page.wait_for_timeout(800)
+                except Exception:
+                    pass
                 
                 self.log("Selecting Book/Page search...")
-                page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Book / Page").click()
-                page.wait_for_timeout(2000)
-
-                self.log(f"Entering Volume: {vol_val}, Page: {pg_val}...")
-                criteria_frame = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").frame_locator("iframe[name='criteriaframe']")
-                criteria_frame.get_by_role("textbox", name="Book").fill(str(vol_val))
-                criteria_frame.get_by_role("textbox", name="Page").fill(str(pg_val))
+                search_pub = page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first
+                search_pub.wait_for(state="visible", timeout=10000)
+                search_pub.click()
+                page.wait_for_timeout(800)
                 
-                self.log("Clicking Search...")
+                bp_tab = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Book / Page")
+                bp_tab.wait_for(state="visible", timeout=10000)
+                bp_tab.click()
+                page.wait_for_timeout(400)
+
+                self.log(f"Searching Volume {vol_val}, Page {pg_val}...")
+                crit = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").frame_locator("iframe[name='criteriaframe']")
+                book_input = crit.get_by_role("textbox", name="Book")
+                book_input.wait_for(state="visible", timeout=10000)
+                book_input.fill(str(vol_val))
+                crit.get_by_role("textbox", name="Page").fill(str(pg_val))
+                
                 page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").locator("img#imgSearch").click()
+                page.wait_for_timeout(1500)
 
-                # Wait for results
-                page.wait_for_timeout(3000)
-
-                # Look for DEED row
-                self.log("Looking for documents in results...")
                 reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
-                
                 try:
                     reslist.locator("tr").first.wait_for(state="visible", timeout=25000)
                 except Exception:
-                    self.log(f"No results found for Volume {vol_val}, Page {pg_val} on county site.")
+                    self.log(f"❌ No records found for Volume {vol_val}, Page {pg_val} on county records.")
                     browser.close()
-                    return
+                    return False
+
+                rows = reslist.locator("tr")
+                target_row = None
+                detected_type = doc_type if doc_type and doc_type != "ALL" else "DOC"
                 
-                rows_locator = reslist.locator("tr")
-                count = rows_locator.count()
-                
-                valid_rows = []
-                for i in range(count):
-                    text = rows_locator.nth(i).inner_text().strip()
-                    if not text or "Instrument" in text or "Book/Page" in text or "Type" in text:
-                        continue # Skip empty or header rows
-                        
-                    if doc_type != "ALL":
-                        if doc_type.upper() == "DEED" and "DEED" not in text.upper():
-                            continue
-                        if doc_type.upper() == "MORTGAGE" and "MORT" not in text.upper() and "MTG" not in text.upper():
-                            continue
-                            
-                    valid_rows.append((rows_locator.nth(i), text))
-                    
-                if not valid_rows:
-                    self.log(f"No valid {doc_type} result rows found for Volume {vol_val}, Page {pg_val}.")
+                for i in range(rows.count()):
+                    txt = rows.nth(i).inner_text().strip()
+                    if not txt or "Instrument" in txt or "Book/Page" in txt:
+                        continue
+                    if doc_type and doc_type.upper() == "DEED" and ("DEED" in txt.upper() or "DR" in txt.upper()):
+                        target_row = rows.nth(i)
+                        detected_type = "Deed"
+                        break
+                    elif doc_type and doc_type.upper() == "MORTGAGE" and ("MORT" in txt.upper() or "MTG" in txt.upper()):
+                        target_row = rows.nth(i)
+                        detected_type = "Mortgage"
+                        break
+                    elif not target_row:
+                        target_row = rows.nth(i)
+                        if "DEED" in txt.upper(): detected_type = "Deed"
+                        elif "MORT" in txt.upper() or "MTG" in txt.upper(): detected_type = "Mortgage"
+                        elif "LEASE" in txt.upper() or "OGL" in txt.upper(): detected_type = "Lease"
+                        elif "ASSIGN" in txt.upper(): detected_type = "Assignment"
+                        elif "RELEASE" in txt.upper() or "SATIS" in txt.upper(): detected_type = "Release"
+
+                if not target_row:
+                    self.log(f"❌ No valid result rows found for Volume {vol_val}, Page {pg_val}.")
                     browser.close()
-                    return
-                    
-                if len(valid_rows) > 1 or doc_type == "ALL":
-                    import threading
-                    selection_event = threading.Event()
-                    selected_index = [-1]
-                    
-                    def ask_user():
-                        dialog = tk.Toplevel(self.root)
-                        dialog.title("Select Document")
-                        
-                        dialog.update_idletasks()
-                        x = self.root.winfo_x() + (self.root.winfo_width() - 600) // 2
-                        y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
-                        dialog.geometry(f"600x300+{x}+{y}")
-                        dialog.transient(self.root)
-                        dialog.grab_set()
-                        
-                        ttk.Label(dialog, text=f"Documents found for Vol {vol_val}, Page {pg_val}.\nPlease select the correct one:", font=("Helvetica", 12)).pack(pady=10)
-                        
-                        listbox = tk.Listbox(dialog, font=("Helvetica", 11), selectmode=tk.SINGLE)
-                        listbox.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
-                        
-                        for idx, (_, txt) in enumerate(valid_rows, start=1):
-                            clean_txt = " | ".join([t.strip() for t in txt.split('\\n') if t.strip()])
-                            listbox.insert(tk.END, f"{idx}. {clean_txt}")
-                            
-                        listbox.selection_set(0)
-                        
-                        btn_frame = ttk.Frame(dialog)
-                        btn_frame.pack(pady=10)
-                        
-                        def on_confirm():
-                            sel = listbox.curselection()
-                            if sel:
-                                selected_index[0] = sel[0]
-                            dialog.destroy()
-                            selection_event.set()
-                            
-                        def on_skip():
-                            dialog.destroy()
-                            selection_event.set()
-                            
-                        ttk.Button(btn_frame, text="Download Selected", command=on_confirm).pack(side=tk.LEFT, padx=10)
-                        ttk.Button(btn_frame, text="Skip", command=on_skip).pack(side=tk.LEFT, padx=10)
-                        
-                        def on_close():
-                            dialog.destroy()
-                            selection_event.set()
-                        dialog.protocol("WM_DELETE_WINDOW", on_close)
+                    return False
 
-                    self.root.after(0, ask_user)
-                    
-                    self.log("Waiting for user to select document from popup...")
-                    selection_event.wait()
-                    
-                    if selected_index[0] == -1:
-                        self.log("User skipped or closed the selection dialog.")
-                        browser.close()
-                        return
-                        
-                    row = valid_rows[selected_index[0]][0]
-                else:
-                    row = valid_rows[0][0]
+                self.log("Opening document in county viewer...")
+                target_row.dblclick()
+                page.on("dialog", lambda d: d.accept())
 
-                self.log("Opening selected document...")
-                row.dblclick()
-                
-                self.log("Waiting for document to fully load in the viewer...")
-                
-                # Auto-accept any unexpected dialogs to prevent hanging
-                page.on("dialog", lambda dialog: dialog.accept())
-                
-                # Dynamically wait until the document viewer reports that pages are loaded
+                self.log("Waiting for document pages to load...")
                 page.frame(name='bodyframe').wait_for_function("""
                     () => {
                         try {
                             var docFrame = document.getElementById("documentFrame");
-                            if (docFrame && docFrame.contentWindow && typeof docFrame.contentWindow.getNumPages === 'function') {
-                                return docFrame.contentWindow.getNumPages() > 0;
-                            }
-                            return false;
-                        } catch (e) {
-                            return false;
-                        }
+                            return docFrame && docFrame.contentWindow && typeof docFrame.contentWindow.getNumPages === 'function' && docFrame.contentWindow.getNumPages() > 0;
+                        } catch (e) { return false; }
                     }
-                """, timeout=60000)
+                """, timeout=50000)
 
-                self.log("Document loaded! Extracting Book Type...")
+                clean_type = "".join(c for c in detected_type if c.isalnum() or c in " _-").strip() or "DOC"
+                self.log(f"Downloading high-resolution document ({clean_type})...")
                 
-                # Extract Book Type dynamically
-                book_type = page.frame(name='bodyframe').evaluate("""
-                    () => {
-                        function getTexts(win) {
-                            let texts = [];
-                            try { texts.push(win.document.body.innerText); } catch(e){}
-                            for (let i=0; i<win.frames.length; i++) {
-                                texts = texts.concat(getTexts(win.frames[i]));
-                            }
-                            return texts;
-                        }
-                        let allTexts = getTexts(window).join("\\n");
-                        let match = allTexts.match(/Book Type:\\s*([A-Za-z]+)/);
-                        return match ? match[1].trim() : "DEED";
-                    }
-                """)
-                
-                self.log(f"Detected Book Type: {book_type}. Triggering document download...")
-                if book_type.upper() == "DEED":
-                    book_type = "DR"
-                    
-                with page.expect_download(timeout=90000) as download_info:
+                with page.expect_download(timeout=60000) as download_info:
                     page.frame(name='bodyframe').evaluate("""
                         var instrId = document.getElementById("documentFrame").contentWindow.getInstrumentId();
                         var numPages = document.getElementById("documentFrame").contentWindow.getNumPages();
                         continueDownloadDocImage(instrId, true, numPages, "printall", false);
                     """)
-                
+
                 download = download_info.value
-                
-                pid_dir = self.get_parcel_dir(parcel_num)
-                docket_dir = os.path.join(pid_dir, "DOCS", "docket")
-                os.makedirs(docket_dir, exist_ok=True)
-                
-                # Determine extension
-                original_name = download.suggested_filename
-                ext = os.path.splitext(original_name)[1] or '.pdf'
-                
-                target_filename = f"{vol_val}-{pg_val} {book_type}{ext}"
-                target_path = os.path.join(docket_dir, target_filename)
-                download.save_as(target_path)
-                
-                if target_path.lower().endswith('.pdf'):
+                out_file = os.path.join(docket_dir, f"{vol_val}-{pg_val} {clean_type}.pdf")
+                download.save_as(out_file)
+
+                if out_file.lower().endswith('.pdf'):
                     try:
                         import fitz
-                        doc = fitz.open(target_path)
-                        
-                        # Properly remove PDF/A compliance
+                        doc = fitz.open(out_file)
                         catalog = doc.pdf_catalog()
                         doc.xref_set_key(catalog, "OutputIntents", "null")
                         doc.xref_set_key(catalog, "Metadata", "null")
-                        
-                        tmp_path = target_path + ".tmp"
+                        tmp_path = out_file + ".tmp"
                         doc.save(tmp_path, incremental=False, deflate=True)
                         doc.close()
                         import shutil
-                        shutil.move(tmp_path, target_path)
+                        shutil.move(tmp_path, out_file)
                     except Exception as e:
-                        self.log(f"Warning: Failed to strip PDF/A compliance: {e}")
-                
-                self.log(f"Successfully downloaded {target_filename} to docket.")
-                
+                        self.log(f"PDF/A sanitization notice: {e}")
+
+                self.log(f"✅ Successfully downloaded {os.path.basename(out_file)} to docket!")
                 browser.close()
-                self.refresh_viewer_list()
-                
+
+                # Refresh UI Document Viewer
+                if hasattr(self, 'root'):
+                    def update_viewer():
+                        self.update_viewer_folders()
+                        docket_val = "DOCS/docket" if not custom_docs_dir else os.path.relpath(docket_dir, pid_dir)
+                        if docket_val in self.viewer_folder_combo['values']:
+                            self.viewer_folder_combo.set(docket_val)
+                        self.refresh_viewer_list()
+                    self.root.after(0, update_viewer)
+
                 if auto_open:
                     import subprocess, sys
                     try:
                         if sys.platform == "darwin":
-                            subprocess.Popen(["open", target_path])
+                            subprocess.Popen(["open", out_file])
                         elif sys.platform == "win32":
-                            os.startfile(target_path)
+                            os.startfile(out_file)
                         else:
-                            subprocess.Popen(["xdg-open", target_path])
+                            subprocess.Popen(["xdg-open", out_file])
                     except Exception as ex:
                         self.log(f"Error opening downloaded document: {ex}")
+
+                return True
         except Exception as e:
-            self.log(f"Error in Kofile scraper: {e}")
+            self.log(f"❌ Kofile scraper error for Vol {vol_val} Pg {pg_val}: {e}")
+            return False
 
     def open_name_search(self):
         pid = self.parcel_entry.get().strip()
