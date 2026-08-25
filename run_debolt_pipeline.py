@@ -105,6 +105,11 @@ def search_kofile(name, start_date, end_date):
                 browser.close()
                 return []
 
+            # Scroll to trigger full virtual DOM hydration (all 124 items)
+            for _ in range(3):
+                reslist.locator("body").evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(1500)
+
             page_num = 1
             while True:
                 rows_data = reslist.locator("tr").evaluate_all("""

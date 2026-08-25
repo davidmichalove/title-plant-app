@@ -3720,6 +3720,11 @@ end tell'''
                         reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
                         reslist.locator("body").wait_for(state="visible", timeout=15000)
                         
+                        # Trigger full virtual DOM hydration by scrolling down
+                        for _ in range(3):
+                            reslist.locator("body").evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                            page.wait_for_timeout(1000)
+                        
                         table_data_json = reslist.locator("body").evaluate("""
                             () => {
                                 let rows = Array.from(document.querySelectorAll('table tr'));
