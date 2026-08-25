@@ -3601,1008 +3601,514 @@ end tell'''
         except Exception as e:
             self.log(f"Error deleting note: {e}")
 
-    def _fetch_kofile_name_search(self, search_params, pid_dir):
-        if not search_params:
-            return
-            
-        parcel_num = os.path.basename(pid_dir).replace("PID ", "")
-            
-        self.log(f"Starting Kofile Name Search for {len(search_params)} owners...")
-        docs_dir = os.path.join(pid_dir, "DOCS")
-        os.makedirs(docs_dir, exist_ok=True)
-        out_file = os.path.join(docs_dir, "Kofile_Name_Search_Results.txt")
+class KofileStreamingProgressWindow(tk.Toplevel):
+    def __init__(self, master, party_name):
+        super().__init__(master)
+        self.title(f"⚡ Title AI Streaming Engine - {party_name}")
+        self.geometry("640x440")
+        self.minsize(550, 350)
+        self.transient(master)
         
-        try:
-            from playwright.sync_api import sync_playwright
-            from datetime import datetime
-            from dateutil.relativedelta import relativedelta
-            import re
-            
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                file_exists = os.path.exists(out_file)
-                with open(out_file, "a") as f:
-                    if not file_exists:
-                        f.write("KOFILE NAME SEARCH RESULTS\n")
-                        f.write("="*80 + "\n\n")
-                        
-                for owner in reversed(search_params):
-                    context = browser.new_context()
-                    page = context.new_page()
-                    self.log("Navigating to Belmont County Recorder...")
-                    page.goto("https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH")
-                    
-                    self.log("Logging in as guest...")
-                    page.locator("input[value='Login as Guest']").click(no_wait_after=True)
-                    page.wait_for_load_state('domcontentloaded')
-                    page.wait_for_timeout(2000)
-                    
-                    self.log("Accepting disclaimer if present...")
-                    try:
-                        page.frame_locator("iframe[name='bodyframe']").locator("input#accept").click(timeout=5000)
-                        page.wait_for_load_state('domcontentloaded')
-                        page.wait_for_timeout(2000)
-                    except: pass
-
-                    name = owner.get("name", "").strip()
-                    if not name:
-                        first = owner.get("first_name", "").strip()
-                        last = owner.get("last_name", "").strip()
-                        if last and first:
-                            name = f"{last} {first}"
-                        elif last:
-                            name = last
-                    if not name: continue
-                    
-                    acq_str = owner.get("acquisition_date")
-                    disp_str = owner.get("disposal_date")
-                    
-                    from_date_str = ""
-                    to_date_str = ""
-                    
-                    try:
-                        if acq_str:
-                            if owner.get("exact_dates"):
-                                from_date_str = acq_str
-                            else:
-                                dt = datetime.strptime(acq_str, "%m/%d/%Y")
-                                dt = dt - relativedelta(years=2)
-                                from_date_str = dt.strftime("%m/%d/%Y")
-                    except: pass
-                    
-                    try:
-                        if disp_str:
-                            if owner.get("exact_dates"):
-                                to_date_str = disp_str
-                            else:
-                                dt = datetime.strptime(disp_str, "%m/%d/%Y")
-                                dt = dt + relativedelta(years=2)
-                                to_date_str = dt.strftime("%m/%d/%Y")
-                    except: pass
-                    
-                    self.log(f"Searching Kofile for: {name} ({from_date_str or 'All'} to {to_date_str or 'Present'})")
-                    
-                    # Navigate to Name search screen
-                    try:
-                        page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first.click(timeout=4000)
-                    except: pass
-                    page.wait_for_timeout(2000)
-                    
-                    page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Name").click()
-                    page.wait_for_timeout(2000)
-                    
-                    criteria_frame = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").frame_locator("iframe[name='criteriaframe']")
-                    
-                    # Clear default names if any
-                    try:
-                        criteria_frame.locator("img#clearIcon").click(timeout=1000)
-                    except: pass
-                    
-                    criteria_frame.get_by_label("Name", exact=True).fill(name)
-                    if from_date_str:
-                        try:
-                            criteria_frame.locator("input[aria-label='Recorded Date From'].textbox-text, input[name*='From']").first.fill(from_date_str)
-                        except: pass
-                    if to_date_str:
-                        try:
-                            criteria_frame.locator("input[aria-label='Recorded Date To'].textbox-text, input[name*='To']").first.fill(to_date_str)
-                        except: pass
-                        
-                    self.log("Clicking Search...")
-                    page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").locator("img#imgSearch").click()
-
-                    # Wait for results
-                    page.wait_for_timeout(3500)
-
-                    self.log(f"Extracting results for {name}...")
-                    
-                    all_parsed_rows = []
-                    seen = set()
-                    
-                    try:
-                        reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
-                        reslist.locator("body").wait_for(state="visible", timeout=15000)
-                        
-                        # Trigger full virtual DOM hydration by scrolling down
-                        for _ in range(3):
-                            reslist.locator("body").evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
-                            page.wait_for_timeout(1000)
-                        
-                        table_data_json = reslist.locator("body").evaluate("""
-                            () => {
-                                let rows = Array.from(document.querySelectorAll('table tr'));
-                                let res = [];
-                                for (let r of rows) {
-                                    let cells = Array.from(r.querySelectorAll('th, td'));
-                                    let rowVals = cells.map(c => c.innerText.split('\\n').join(' ').trim());
-                                    if (rowVals.length >= 6) {
-                                        res.push(rowVals);
-                                    }
-                                }
-                                return res;
-                            }
-                        """)
-                        
-                        for row in table_data_json:
-                            # Skip table headers
-                            if any("Instrument" in c or "Document Type" in c for c in row):
-                                continue
-                                
-                            # Locate the date column (matches MM/DD/YYYY)
-                            date_idx = -1
-                            for i, val in enumerate(row):
-                                if re.match(r"^\d{2}/\d{2}/\d{4}$", val.strip()):
-                                    date_idx = i
-                                    break
-                                    
-                            if date_idx == -1:
-                                continue
-                                
-                            inst = row[date_idx - 3].strip() if date_idx >= 3 else ""
-                            vol = row[date_idx - 2].strip() if date_idx >= 2 else ""
-                            pg = row[date_idx - 1].strip() if date_idx >= 1 else ""
-                            date = row[date_idx].strip()
-                            dtype = row[date_idx + 1].strip() if len(row) > date_idx + 1 else ""
-                            
-                            name_role = row[date_idx + 2].strip() if len(row) > date_idx + 2 else ""
-                            name_val = row[date_idx + 3].strip() if len(row) > date_idx + 3 else ""
-                            
-                            other_role = row[date_idx + 4].strip() if len(row) > date_idx + 4 else ""
-                            other_name = row[date_idx + 5].strip() if len(row) > date_idx + 5 else ""
-                            
-                            legal = row[date_idx + 6].strip() if len(row) > date_idx + 6 else ""
-                            
-                            grantor = ""
-                            grantee = ""
-                            if name_role == "R": grantor = name_val
-                            elif name_role in ("E", "D"): grantee = name_val
-                            
-                            if other_role == "R": grantor = other_name if not grantor else f"{grantor} & {other_name}"
-                            elif other_role in ("E", "D"): grantee = other_name if not grantee else f"{grantee} & {other_name}"
-                            
-                            volpg = f"{vol}/{pg}" if vol and pg else vol or pg
-                            key = (inst, volpg, date, dtype, grantor, grantee)
-                            if key not in seen:
-                                seen.add(key)
-                                all_parsed_rows.append((inst, dtype, volpg, date, grantor, grantee, legal))
-                                
-                    except Exception as e:
-                        self.log(f"Extraction for {name}: {str(e)}")
-                        
-                    try:
-                        with open(out_file, "a") as f:
-                            f.write(f"--- Results for: {name} ({from_date_str or 'All'} to {to_date_str or 'Present'}) ---\n")
-                            if all_parsed_rows:
-                                f.write(f"Found {len(all_parsed_rows)} documents:\n")
-                                for r in all_parsed_rows:
-                                    f.write(f"  [{r[1]}] Vol/Pg: {r[2]} | Date: {r[3]} | Grantor: {r[4]} | Grantee: {r[5]} | Legal: {r[6]}\n")
-                            else:
-                                f.write("  No documents found.\n")
-                            f.write("\n")
-                        self.log(f"Saved {len(all_parsed_rows)} document records for {name} to {os.path.basename(out_file)}.")
-                    except Exception as e:
-                        self.log(f"Error writing results for {name}: {str(e)}")
-                        
-                    if all_parsed_rows and hasattr(self, 'root'):
-                        # Launch interactive results and downloader dialog on UI thread
-                        t_lot = owner.get("target_lot", "")
-                        t_parcel = owner.get("target_parcel", "")
-                        self.root.after(0, lambda n=name, r=list(all_parsed_rows), pd=pid_dir, tl=t_lot, tp=t_parcel: self.show_name_search_results_dialog(n, r, pd, target_lot=tl, target_parcel=tp))
-                        
-                    context.close()
-                    
-                browser.close()
-                
-            self.log("Kofile Name Search completed successfully.")
-            
-            # Refresh Document Viewer folders so DOCS / text file shows up
-            if hasattr(self, 'root'):
-                def refresh_ui():
-                    self.update_viewer_folders()
-                    self.viewer_folder_combo.set("DOCS")
-                    self.refresh_viewer_list()
-                self.root.after(0, refresh_ui)
-                
-        except Exception as e:
-            self.log(f"Kofile name search failed: {e}")
-
-    def show_name_search_results_dialog(self, owner_name, records, pid_dir, target_lot="", target_parcel=""):
-        if not records:
-            from tkinter import messagebox
-            messagebox.showinfo("Name Search Results", f"No documents found on Kofile for '{owner_name}'.", parent=self.root)
-            return
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title(f"Name Search Results: {owner_name} ({len(records)} Documents)")
-        dialog.geometry("1100x650")
-        dialog.minsize(850, 500)
-        dialog.transient(self.root)
-        
-        clean_folder_name = "".join(c for c in owner_name if c.isalnum() or c in " _-").strip() or "Name_Search_Docs"
-        parcel_num = target_parcel or os.path.basename(pid_dir).replace("PID ", "").strip()
-        
-        # State tracking: all rows selected by default for 1-click batch download
-        selected_keys = set(range(len(records)))
-        
-        # Top banner frame
-        top_frame = ttk.Frame(dialog, padding=(12, 10))
+        # Header
+        top_frame = ttk.Frame(self, padding=12)
         top_frame.pack(fill=tk.X)
         
-        # Dark mode detection for macOS / Night mode
-        is_dark = False
-        try:
-            import subprocess
-            res = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True)
-            is_dark = "Dark" in res.stdout
-        except:
-            is_dark = False
+        ttk.Label(top_frame, text=f"⚡ Title AI Streaming Engine: {party_name}", font=("Helvetica", 13, "bold")).pack(anchor=tk.W)
+        self.status_lbl = ttk.Label(top_frame, text="Starting search on Belmont County Recorder...", font=("Helvetica", 10), foreground="#4a5568")
+        self.status_lbl.pack(anchor=tk.W, pady=(2, 4))
+        
+        self.progress_bar = ttk.Progressbar(top_frame, orient=tk.HORIZONTAL, mode="indeterminate")
+        self.progress_bar.pack(fill=tk.X, pady=(4, 8))
+        self.progress_bar.start(10)
+        
+        # Live Activity Log Area
+        log_frame = ttk.LabelFrame(self, text="📜 Live Activity & AI Triage Log", padding=8)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+        
+        import tkinter.scrolledtext as st
+        self.log_text = st.ScrolledText(log_frame, wrap=tk.WORD, font=("Courier", 10))
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Bottom controls
+        btn_frame = ttk.Frame(self, padding=(12, 8))
+        btn_frame.pack(fill=tk.X)
+        
+        self.close_btn = ttk.Button(btn_frame, text="Minimize / Close Window", command=self.destroy)
+        self.close_btn.pack(side=tk.RIGHT)
 
-        if is_dark:
-            bg_even = "#202020"
-            bg_odd = "#2b2b2b"
-            bg_checked = "#1a365d"
-            fg_text = "#ffffff"
-            fg_checked = "#63b3ed"
-            sub_color = "#a0aec0"
-            count_color = "#63b3ed"
-        else:
-            bg_even = "#ffffff"
-            bg_odd = "#f7fafc"
-            bg_checked = "#ebf8ff"
-            fg_text = "#1a202c"
-            fg_checked = "#2b6cb0"
-            sub_color = "#4a5568"
-            count_color = "#2b6cb0"
+    def _run_kofile_streaming_pipeline(self, name, start_date, end_date, target_lot, target_parcel, pid_dir, progress_win=None):
+        import time, json, os, re, shutil, queue, threading
+        from playwright.sync_api import sync_playwright
+        from google import genai
+        from google.genai import types
 
-        title_lbl = ttk.Label(top_frame, text=f"📋 Search Results for: {owner_name}", font=("Helvetica", 14, "bold"))
-        title_lbl.pack(anchor=tk.W)
-        
-        sub_lbl = ttk.Label(top_frame, text=f"Found {len(records)} records on Belmont County Recorder. Select the documents you wish to download below:", foreground=sub_color)
-        sub_lbl.pack(anchor=tk.W, pady=(2, 6))
-        
-        folder_frame = ttk.Frame(top_frame)
-        folder_frame.pack(fill=tk.X, pady=(2, 4))
-        ttk.Label(folder_frame, text="📁 Save Folder:  DOCS / ", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT)
-        folder_var = tk.StringVar(value=clean_folder_name)
-        folder_entry = ttk.Entry(folder_frame, textvariable=folder_var, width=32, font=("Helvetica", 11))
-        folder_entry.pack(side=tk.LEFT, padx=5)
-        
-        # Target Tract Criteria Frame (Lot and Parcel ID)
-        crit_frame = ttk.LabelFrame(top_frame, text="🎯 Target Tract Criteria (For 1-Click AI Hits Triage)", padding=6)
-        crit_frame.pack(fill=tk.X, pady=(4, 2))
-        
-        ttk.Label(crit_frame, text="Target Lot(s):").pack(side=tk.LEFT, padx=(4, 2))
-        lot_var = tk.StringVar(value=target_lot)
-        lot_entry = ttk.Entry(crit_frame, textvariable=lot_var, width=12, font=("Helvetica", 11))
-        lot_entry.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(crit_frame, text="Parcel ID:").pack(side=tk.LEFT, padx=(4, 2))
-        parcel_var = tk.StringVar(value=parcel_num)
-        parcel_entry = ttk.Entry(crit_frame, textvariable=parcel_var, width=16, font=("Helvetica", 11))
-        parcel_entry.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(crit_frame, text="Last Name Filter:").pack(side=tk.LEFT, padx=(4, 2))
-        # Extract last name from owner_name
-        last_name_cand = owner_name.split()[0] if owner_name else ""
-        if len(owner_name.split()) > 1 and owner_name.split()[1] and not owner_name.split()[0].endswith(","):
-            # Could be First Last
-            last_name_cand = owner_name.split()[-1] if not any(c in owner_name for c in [",", "/"]) else owner_name.split()[0]
-        last_name_var = tk.StringVar(value=last_name_cand.replace(",", "").strip())
-        last_name_entry = ttk.Entry(crit_frame, textvariable=last_name_var, width=12, font=("Helvetica", 11))
-        last_name_entry.pack(side=tk.LEFT, padx=(0, 5))
-        
-        # Filter and selection control toolbar
-        toolbar1 = ttk.Frame(dialog, padding=(12, 4))
-        toolbar1.pack(fill=tk.X)
-        
-        ttk.Label(toolbar1, text="Filter:", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(0, 3))
-        filter_var = tk.StringVar()
-        filter_entry = ttk.Entry(toolbar1, textvariable=filter_var, width=15, font=("Helvetica", 11))
-        filter_entry.pack(side=tk.LEFT, padx=(0, 8))
-        
-        ttk.Label(toolbar1, text="Date From:", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(4, 3))
-        date_from_var = tk.StringVar()
-        date_from_entry = ttk.Entry(toolbar1, textvariable=date_from_var, width=11, font=("Helvetica", 11))
-        date_from_entry.pack(side=tk.LEFT, padx=(0, 4))
-        
-        ttk.Label(toolbar1, text="To:", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(4, 3))
-        date_to_var = tk.StringVar()
-        date_to_entry = ttk.Entry(toolbar1, textvariable=date_to_var, width=11, font=("Helvetica", 11))
-        date_to_entry.pack(side=tk.LEFT, padx=(0, 8))
-        
-        btn_top_ai = ttk.Button(toolbar1, text="⚡ DOWNLOAD & AI TRIAGE HITS", style="Accent.TButton")
-        btn_top_ai.pack(side=tk.RIGHT, padx=2)
+        t_start = time.time()
+        clean_folder_name = "".join(c for c in name if c.isalnum() or c in " _-").strip() or "Name_Search_Docs"
+        target_dir = os.path.join(pid_dir, "DOCS", clean_folder_name)
+        hits_dir = os.path.join(target_dir, "Hits")
+        os.makedirs(target_dir, exist_ok=True)
+        os.makedirs(hits_dir, exist_ok=True)
 
-        btn_top_dl = ttk.Button(toolbar1, text="⬇️ Download Selected")
-        btn_top_dl.pack(side=tk.RIGHT, padx=2)
-        
-        count_lbl = ttk.Label(toolbar1, text="Selected: 0 of 0", font=("Helvetica", 12, "bold"), foreground=count_color)
-        count_lbl.pack(side=tk.RIGHT, padx=8)
-        
-        # Toolbar 2: Quick Type Presets
-        toolbar2 = ttk.Frame(dialog, padding=(12, 2))
-        toolbar2.pack(fill=tk.X)
-        
-        ttk.Label(toolbar2, text="Quick Select:", font=("Helvetica", 10, "italic"), foreground=sub_color).pack(side=tk.LEFT, padx=(0, 4))
-        btn_sel_all = ttk.Button(toolbar2, text="Select All", width=10)
-        btn_sel_all.pack(side=tk.LEFT, padx=2)
-        
-        btn_desel_all = ttk.Button(toolbar2, text="Deselect All", width=11)
-        btn_desel_all.pack(side=tk.LEFT, padx=2)
+        # Extract last name
+        last_name_cand = name.split()[0] if name else ""
+        if len(name.split()) > 1 and name.split()[1] and not name.split()[0].endswith(","):
+            last_name_cand = name.split()[-1] if not any(c in name for c in [",", "/"]) else name.split()[0]
+        last_name = last_name_cand.replace(",", "").strip().upper()
 
-        status_lbl = ttk.Label(bot_frame, text="", font=("Helvetica", 11, "bold"))
-        status_lbl.pack(side=tk.LEFT)
-        
-        progress_bar = ttk.Progressbar(bot_frame, orient=tk.HORIZONTAL, mode="determinate", length=220)
-        
-        def execute_download(run_ai=False):
-            if not selected_keys:
-                from tkinter import messagebox
-                messagebox.showwarning("No Selection", "Please select at least one document to download by clicking its row or using Select All.", parent=dialog)
-                return
-                
-            target_fld = folder_var.get().strip() or clean_folder_name
-            target_dir = os.path.join(pid_dir, "DOCS", target_fld)
-            hits_dir = os.path.join(target_dir, "Hits")
-            os.makedirs(target_dir, exist_ok=True)
-            if run_ai:
-                os.makedirs(hits_dir, exist_ok=True)
-            
-            selected_records = [records[i] for i in sorted(selected_keys)]
-            target_lot = lot_var.get().strip()
-            target_parcel = parcel_var.get().strip()
-            filter_last_name = last_name_var.get().strip()
-            
-            btn_dl.config(state=tk.DISABLED)
-            btn_ai.config(state=tk.DISABLED)
-            btn_top_dl.config(state=tk.DISABLED)
-            btn_top_ai.config(state=tk.DISABLED)
-            btn_close.config(state=tk.DISABLED)
-            progress_bar.pack(side=tk.LEFT, padx=10)
-            progress_bar['maximum'] = len(selected_records)
-            progress_bar['value'] = 0
-            
-            def download_worker():
-                import queue
-                import threading
-                import re
-                import shutil
-                from google import genai
-                from google.genai import types
-                
-                # Deduplicate Book/Page
-                items_to_download = []
-                seen_bp = set()
-                for r in selected_records:
-                    inst, dtype, volpg, date, grantor, grantee, legal = r
-                    m = re.search(r'(\d+)\s*[-/]\s*(\d+)', volpg)
-                    if m:
-                        v, p = m.group(1), m.group(2)
-                        if (v, p) not in seen_bp:
-                            seen_bp.add((v, p))
-                            items_to_download.append((v, p, dtype, r))
-                    elif volpg.isdigit():
-                        if (volpg, "1") not in seen_bp:
-                            seen_bp.add((volpg, "1"))
-                            items_to_download.append((volpg, "1", dtype, r))
-
-                if not items_to_download:
-                    dialog.after(0, lambda: messagebox.showwarning("No Valid Records", "None of the selected records had a valid Volume and Page to download.", parent=dialog))
-                    return
-
-                total_items = len(items_to_download)
-                download_queue = queue.Queue()
-                for item in items_to_download:
-                    download_queue.put(item)
-
-                ai_queue = queue.Queue()
-                all_ai_results = []
-                results_lock = threading.Lock()
-                download_complete_event = threading.Event()
-                completed_count = [0]
-
-                # Setup Gemini Client if AI screening enabled
-                client = None
-                if run_ai:
-                    try:
-                        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-                        with open(cfg_path) as f:
-                            api_key = json.load(f)["GEMINI_API_KEY"]
-                        client = genai.Client(api_key=api_key)
-                    except Exception as e:
-                        self.log(f"Gemini init warning: {e}")
-
-                def screen_doc(pdf_path, doc_type):
-                    if not client: return {"filename": os.path.basename(pdf_path), "filepath": pdf_path, "is_direct_hit": False}
-                    fn = os.path.basename(pdf_path)
-                    try:
-                        with open(pdf_path, "rb") as f:
-                            pdf_bytes = f.read()
-                        
-                        prompt = f"""
-                        You are an expert real estate, oil & gas title attorney examining title records from Belmont County, Ohio.
-                        Examine this entire document carefully, including Page 1, Page 2, Page 3, and any attached EXHIBIT "A", EXHIBIT "B", Legal Schedules, or Parcel Tables.
-
-                        TARGET SEARCH OBJECTIVES:
-                        1. Check if this document conveys, leases, encumbers, ratifies, assigns, or references:
-                           - Target Lot(s): "{target_lot}" (including In-Lot, Out-Lot, or Lot numbers)
-                           - Target Parcel ID(s): "{target_parcel}"
-                        2. OIL & GAS LEASE SPECIAL INSTRUCTION:
-                           - Carefully read all tabular columns in Exhibit "A" / Exhibit "B" schedules. Look for matching Lots, Parcels, or Prior Deed references.
-                        3. MORTGAGES & LIENS:
-                           - Does this mortgage encumber the target Lot or Parcel?
-                        4. RELEASES / SATISFACTIONS / ASSIGNMENTS:
-                           - What original Mortgage or Lease Book/Volume and Page numbers does this document release, assign, modify, or satisfy?
-
-                        Return a strict JSON object:
-                        {{
-                          "is_direct_hit": true or false,
-                          "hit_reasons": ["List matching reasons"],
-                          "lots_found": ["List all lot numbers"],
-                          "parcels_found": ["List all parcel IDs"],
-                          "document_type": "{doc_type}",
-                          "recorded_date": "MM/DD/YYYY if visible",
-                          "grantor": "Grantor / Direct Party",
-                          "grantee": "Grantee / Reverse Party",
-                          "is_mortgage": true or false,
-                          "referenced_prior_vol_pgs": ["List any referenced prior deed, mortgage, or lease Vol/Pg numbers (e.g. '865/633', '618/161')"],
-                          "legal_summary": "1-2 sentence concise summary of the land or tract description",
-                          "exact_excerpt": "Exact text or table line from document"
-                        }}
-                        """
-                        res = client.models.generate_content(
-                            model='gemini-3.6-flash',
-                            contents=[types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), prompt],
-                            config={"response_mime_type": "application/json"}
-                        )
-                        data = json.loads(res.text.strip())
-                        data["filename"] = fn
-                        data["filepath"] = pdf_path
-                        return data
-                    except Exception as e:
-                        return {"filename": fn, "filepath": pdf_path, "is_direct_hit": False, "hit_reasons": [str(e)], "referenced_prior_vol_pgs": []}
-
-                def extract_volpg_regex(pdf_path):
-                    import fitz
-                    refs = set()
-                    try:
-                        doc = fitz.open(pdf_path)
-                        text = " ".join([page.get_text() for page in doc])
-                        m = re.findall(r'(?:VOL(?:UME)?\.?|BOOK)\s*#?\s*(\d{1,4})\s*(?:AT\s*)?(?:PAGE|PG\.?)\s*#?\s*(\d{1,4})', text, re.IGNORECASE)
-                        for v, p in m:
-                            refs.add(f"{int(v)}/{int(p)}")
-                            refs.add(f"{v}/{p}")
-                    except: pass
-                    return list(refs)
-
-                # AI Consumers (4 parallel threads)
-                def ai_consumer(worker_id):
-                    while not download_complete_event.is_set() or not ai_queue.empty():
-                        try:
-                            pdf_path, doc_type = ai_queue.get(timeout=1.5)
-                        except queue.Empty:
-                            continue
-                        
-                        data = screen_doc(pdf_path, doc_type)
-                        regex_refs = extract_volpg_regex(pdf_path)
-                        existing_refs = data.get("referenced_prior_vol_pgs", [])
-                        for rf in regex_refs:
-                            if rf not in existing_refs:
-                                existing_refs.append(rf)
-                        data["referenced_prior_vol_pgs"] = existing_refs
-
-                        is_hit = data.get("is_direct_hit", False)
-                        if is_hit:
-                            self.log(f"⭐ AI CONFIRMED HIT: {os.path.basename(pdf_path)}")
-                        with results_lock:
-                            all_ai_results.append(data)
-                        ai_queue.task_done()
-
-                ai_threads = []
-                if run_ai:
-                    for i in range(4):
-                        t = threading.Thread(target=ai_consumer, args=(i+1,), daemon=True)
-                        t.start()
-                        ai_threads.append(t)
-
-                # Scraper Producers (5 parallel workers with 400ms micro-stagger)
-                def scraper_producer(worker_id):
-                    time.sleep(worker_id * 0.4)
-                    while True:
-                        try:
-                            vol, pg, dtype, r = download_queue.get_nowait()
-                        except queue.Empty:
-                            break
-
-                        # 1. Try local drive archive first
-                        res = self.copy_local_deed(parcel_num, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
-                        clean_type = "".join(c for c in dtype if c.isalnum() or c in " _-").strip() or "DOC"
-                        expected_pdf = os.path.join(target_dir, f"{vol}-{pg} {clean_type}.pdf")
-                        
-                        if not res:
-                            self.log(f"Downloading from Kofile (Worker-{worker_id}): {dtype} Vol {vol} Pg {pg}...")
-                            res = self._fetch_kofile_single_doc_worker(vol, pg, dtype, target_dir, last_name=filter_last_name)
-
-                        if res and os.path.exists(expected_pdf):
-                            if run_ai:
-                                ai_queue.put((expected_pdf, dtype))
-
-                        completed_count[0] += 1
-                        cur = completed_count[0]
-                        dialog.after(0, lambda c=cur, t=dtype, v=vol, p=pg: [
-                            progress_bar.config(value=c),
-                            status_lbl.config(text=f"Processed ({c}/{total_items}): {t} {v}-{p}...")
-                        ])
-                        download_queue.task_done()
-
-                scraper_threads = []
-                for i in range(5):
-                    t = threading.Thread(target=scraper_producer, args=(i+1,))
-                    t.start()
-                    scraper_threads.append(t)
-
-                for st in scraper_threads:
-                    st.join()
-
-                download_complete_event.set()
-                for at in ai_threads:
-                    at.join()
-
-                # Relational Linking
-                if run_ai and all_ai_results:
-                    hit_volpgs = set()
-                    for r in all_ai_results:
-                        if r.get("is_direct_hit"):
-                            m = re.search(r'(\d+)-(\d+)', r["filename"])
-                            if m:
-                                v, p = m.group(1), m.group(2)
-                                hit_volpgs.add(f"{v}/{p}")
-                                hit_volpgs.add(f"{int(v)}/{int(p)}")
-
-                    for r in all_ai_results:
-                        if not r.get("is_direct_hit"):
-                            refs = r.get("referenced_prior_vol_pgs", [])
-                            for ref in refs:
-                                clean_ref = ref.replace(" ", "").replace("-", "/")
-                                parts = clean_ref.split("/")
-                                if len(parts) == 2:
-                                    v_p, p_p = parts
-                                    norm_ref = f"{int(v_p)}/{int(p_p)}" if v_p.isdigit() and p_p.isdigit() else clean_ref
-                                else:
-                                    norm_ref = clean_ref
-
-                                if clean_ref in hit_volpgs or norm_ref in hit_volpgs:
-                                    r["is_direct_hit"] = True
-                                    r["hit_reasons"].append(f"References Hit Instrument Vol/Pg {clean_ref}")
-                                    break
-
-                    confirmed_hits = [r for r in all_ai_results if r.get("is_direct_hit")]
-                    non_hits = [r for r in all_ai_results if not r.get("is_direct_hit")]
-
-                    for h in confirmed_hits:
-                        shutil.copy2(h["filepath"], os.path.join(hits_dir, h["filename"]))
-
-                    # Generate Markdown Hits Report
-                    report_path = os.path.join(target_dir, "Title_AI_Hits_Report.md")
-                    with open(report_path, "w") as f:
-                        f.write("# 🏆 Complete Title Examination & AI Triage Report\n\n")
-                        f.write(f"**Target Tract Criteria**: Lot {target_lot or 'N/A'} | Parcel `{target_parcel or 'N/A'}`\n")
-                        f.write(f"**Owner Searched**: {owner_name}\n")
-                        f.write(f"**Total Documents Examined**: {len(all_ai_results)}\n")
-                        f.write(f"**Total Confirmed Hits**: **{len(confirmed_hits)}**\n")
-                        f.write(f"**Hits Output Folder**: `DOCS/{target_fld}/Hits/`\n\n")
-                        f.write("---\n\n")
-                        f.write("## ⭐ Confirmed Hits (Affecting Target Tract)\n\n")
-
-                        for idx, h in enumerate(sorted(confirmed_hits, key=lambda x: x["filename"]), 1):
-                            fn = h["filename"]
-                            dtype = h.get("document_type", "N/A")
-                            rdate = h.get("recorded_date", "N/A")
-                            grantor = h.get("grantor", "N/A")
-                            grantee = h.get("grantee", "N/A")
-                            lots = ", ".join(h.get("lots_found", [])) or "None"
-                            parcels = ", ".join(h.get("parcels_found", [])) or "None"
-                            summary = h.get("legal_summary", "N/A")
-                            reasons = " | ".join(h.get("hit_reasons", []))
-                            excerpt = h.get("exact_excerpt", "").strip()
-
-                            f.write(f"### {idx}. 📄 `{fn}`\n")
-                            f.write(f"- **Document Type**: {dtype}\n")
-                            f.write(f"- **Recorded Date**: {rdate}\n")
-                            f.write(f"- **Parties**: {grantor} ➔ {grantee}\n")
-                            f.write(f"- **Hit Reasons**: `{reasons}`\n")
-                            f.write(f"- **Lots Found**: {lots}\n")
-                            f.write(f"- **Parcels Found**: {parcels}\n")
-                            f.write(f"- **Legal Summary**: {summary}\n")
-                            if excerpt:
-                                f.write(f"- **Document Excerpt**:\n> *\"{excerpt}\"*\n\n")
-                            f.write("\n")
-
-                def on_done():
-                    btn_dl.config(state=tk.NORMAL)
-                    btn_ai.config(state=tk.NORMAL)
-                    btn_top_dl.config(state=tk.NORMAL)
-                    btn_top_ai.config(state=tk.NORMAL)
-                    btn_close.config(state=tk.NORMAL)
-                    progress_bar.pack_forget()
-                    
-                    # Refresh Document Viewer folders
-                    self.update_viewer_folders()
-                    target_combo_val = f"DOCS/{target_fld}/Hits" if run_ai else f"DOCS/{target_fld}"
-                    if target_combo_val in self.viewer_folder_combo['values']:
-                        self.viewer_folder_combo.set(target_combo_val)
-                    elif f"DOCS/{target_fld}" in self.viewer_folder_combo['values']:
-                        self.viewer_folder_combo.set(f"DOCS/{target_fld}")
-                    self.refresh_viewer_list()
-                    
-                    if run_ai:
-                        num_hits = len([r for r in all_ai_results if r.get("is_direct_hit")])
-                        status_lbl.config(text=f"🏆 AI Triage Complete: {num_hits} Confirmed Hits in DOCS/{target_fld}/Hits!")
-                        from tkinter import messagebox
-                        msg = f"🎉 Title Examination & AI Triage Complete!\n\nExamined: {len(all_ai_results)} documents\nConfirmed Hits: {num_hits} documents\n\nHits saved in: DOCS/{target_fld}/Hits/\nFull Report: DOCS/{target_fld}/Title_AI_Hits_Report.md\n\nWould you like to open the Hits folder in Finder?"
-                        if messagebox.askyesno("AI Triage Complete", msg, parent=dialog):
-                            import subprocess, sys
-                            try:
-                                if sys.platform == "darwin":
-                                    subprocess.Popen(["open", hits_dir])
-                                elif sys.platform == "win32":
-                                    os.startfile(hits_dir)
-                                else:
-                                    subprocess.Popen(["xdg-open", hits_dir])
-                            except: pass
-                    else:
-                        status_lbl.config(text=f"✅ Finished downloading {completed_count[0]} documents to DOCS/{target_fld}!")
-                        from tkinter import messagebox
-                        msg = f"Successfully downloaded {completed_count[0]} documents into folder:\nDOCS/{target_fld}/\n\nWould you like to open this folder in Finder?"
-                        if messagebox.askyesno("Download Complete", msg, parent=dialog):
-                            import subprocess, sys
-                            try:
-                                if sys.platform == "darwin":
-                                    subprocess.Popen(["open", target_dir])
-                                elif sys.platform == "win32":
-                                    os.startfile(target_dir)
-                                else:
-                                    subprocess.Popen(["xdg-open", target_dir])
-                            except: pass
-                        
-                dialog.after(0, on_done)
-                
-            import threading
-            threading.Thread(target=download_worker, daemon=True).start()
-            
-        btn_top_ai.config(command=lambda: execute_download(run_ai=True))
-        btn_top_dl.config(command=lambda: execute_download(run_ai=False))
-        
-        btn_close = ttk.Button(bot_frame, text="Close", command=dialog.destroy)
-        btn_close.pack(side=tk.RIGHT, padx=5)
-        
-        btn_dl = ttk.Button(bot_frame, text="⬇️ Download Selected Only", command=lambda: execute_download(run_ai=False))
-        btn_dl.pack(side=tk.RIGHT, padx=5)
-
-        btn_ai = ttk.Button(bot_frame, text="⚡ DOWNLOAD & AI TRIAGE HITS", command=lambda: execute_download(run_ai=True), style="Accent.TButton")
-        btn_ai.pack(side=tk.RIGHT, padx=5)
-        
-        # Initial table population
-        refresh_table()
-        
-        btn_sel_deeds = ttk.Button(toolbar2, text="Only Deeds", width=11)
-        btn_sel_deeds.pack(side=tk.LEFT, padx=2)
-        
-        btn_sel_leases = ttk.Button(toolbar2, text="Only Leases", width=11)
-        btn_sel_leases.pack(side=tk.LEFT, padx=2)
-        
-        btn_sel_mtgs = ttk.Button(toolbar2, text="Only Mortgages", width=13)
-        btn_sel_mtgs.pack(side=tk.LEFT, padx=2)
-        
-        import textwrap
-        
-        # Style configuration with generous row height for multi-line wrapped text
-        tree_style = ttk.Style(dialog)
-        tree_style.configure("NameSearch.Treeview", rowheight=52, font=("Helvetica", 12))
-        tree_style.configure("NameSearch.Treeview.Heading", font=("Helvetica", 12, "bold"))
-
-        # Treeview Frame
-        tree_frame = ttk.Frame(dialog, padding=(12, 4))
-        tree_frame.pack(fill=tk.BOTH, expand=True)
-        
-        cols = ("sel", "type", "volpg", "date", "grantor", "grantee", "legal")
-        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended", style="NameSearch.Treeview")
-        
-        tree.heading("sel", text="[ ✓ ]")
-        tree.heading("type", text="Document Type")
-        tree.heading("volpg", text="Vol / Pg")
-        tree.heading("date", text="Recorded Date")
-        tree.heading("grantor", text="Grantor / Direct")
-        tree.heading("grantee", text="Grantee / Reverse")
-        tree.heading("legal", text="Legal / Description Notes")
-        
-        tree.column("sel", width=50, minwidth=40, anchor=tk.CENTER, stretch=False)
-        tree.column("type", width=130, minwidth=90, anchor=tk.W, stretch=False)
-        tree.column("volpg", width=95, minwidth=75, anchor=tk.CENTER, stretch=False)
-        tree.column("date", width=95, minwidth=75, anchor=tk.CENTER, stretch=False)
-        tree.column("grantor", width=180, minwidth=110, anchor=tk.W, stretch=False)
-        tree.column("grantee", width=180, minwidth=110, anchor=tk.W, stretch=False)
-        tree.column("legal", width=420, minwidth=240, anchor=tk.W, stretch=True)
-        
-        sb_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
-        sb_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=tree.xview)
-        tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        
-        tree.grid(row=0, column=0, sticky="nsew")
-        sb_y.grid(row=0, column=1, sticky="ns")
-        sb_x.grid(row=1, column=0, sticky="ew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-        
-        tree.tag_configure("even", background=bg_even, foreground=fg_text)
-        tree.tag_configure("odd", background=bg_odd, foreground=fg_text)
-        tree.tag_configure("checked", background=bg_checked, foreground=fg_checked)
-        
-        # Details / Legal Notes Inspector Panel
-        details_frame = ttk.LabelFrame(dialog, text="📄 Document Details & Legal Description (Full Inspector)", padding=(8, 6))
-        details_frame.pack(fill=tk.X, padx=12, pady=(2, 6))
-        
-        details_text = tk.Text(details_frame, height=4, wrap=tk.WORD, font=("Helvetica", 13), bg=bg_odd, fg=fg_text, relief=tk.FLAT, padx=8, pady=4, highlightthickness=0)
-        details_text.pack(fill=tk.X, expand=True)
-        details_text.insert("1.0", "💡 Select any document in the table above to inspect full legal notes and details in larger font.")
-        details_text.config(state=tk.DISABLED)
-        
-        def on_tree_select(event=None):
-            sel = tree.selection()
-            if not sel: return
-            try:
-                idx = int(sel[0])
-                if idx < len(records):
-                    inst, dtype, volpg, date, grantor, grantee, legal = records[idx]
-                    details_text.config(state=tk.NORMAL)
-                    details_text.delete("1.0", tk.END)
-                    details_text.insert(tk.END, f"[{dtype}]  Vol/Pg: {volpg}   |   Recorded: {date}   |   Instrument #: {inst or 'N/A'}\n")
-                    details_text.insert(tk.END, f"Grantor: {grantor or 'N/A'}   -->   Grantee: {grantee or 'N/A'}\n")
-                    details_text.insert(tk.END, f"Legal Notes: {legal or 'None'}")
-                    details_text.config(state=tk.DISABLED)
-            except: pass
-            
-        tree.bind("<<TreeviewSelect>>", on_tree_select)
-        
-        def refresh_table(*args):
-            query = filter_var.get().lower().strip()
-            df_str = date_from_var.get().strip()
-            dt_str = date_to_var.get().strip()
-            
-            d_from = None
-            d_to = None
-            from datetime import datetime
-            if df_str:
-                try: d_from = datetime.strptime(df_str, "%m/%d/%Y")
-                except: pass
-            if dt_str:
-                try: d_to = datetime.strptime(dt_str, "%m/%d/%Y")
-                except: pass
-                
-            tree.delete(*tree.get_children())
-            visible_count = 0
-            for idx, r in enumerate(records):
-                inst, dtype, volpg, date, grantor, grantee, legal = r
-                
-                row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
-                if query and query not in row_str:
-                    continue
-                    
-                if date and (d_from or d_to):
-                    try:
-                        row_dt = datetime.strptime(date, "%m/%d/%Y")
-                        if d_from and row_dt < d_from: continue
-                        if d_to and row_dt > d_to: continue
-                    except: pass
-                    
-                is_checked = idx in selected_keys
-                check_mark = "[ ✓ ]" if is_checked else "[   ]"
-                tag = "checked" if is_checked else ("even" if visible_count % 2 == 0 else "odd")
-                
-                wrapped_legal = textwrap.fill(legal, width=44) if legal else ""
-                tree.insert("", tk.END, iid=str(idx), values=(check_mark, dtype, volpg, date, grantor, grantee, wrapped_legal), tags=(tag,))
-                visible_count += 1
-                
-            sel_n = len(selected_keys)
-            count_lbl.config(text=f"Selected: {sel_n} of {len(records)} ({visible_count} visible)")
-            btn_top_dl.config(text=f"⬇️ DOWNLOAD SELECTED ({sel_n})")
-            btn_dl.config(text=f"⬇️ DOWNLOAD SELECTED ({sel_n})")
-            
-        def toggle_selection(event=None):
-            selected_items = tree.selection()
-            if not selected_items: return
-            for item_id in selected_items:
-                idx = int(item_id)
-                if idx in selected_keys:
-                    selected_keys.remove(idx)
-                else:
-                    selected_keys.add(idx)
-            refresh_table()
-            
-        def select_all():
-            query = filter_var.get().lower().strip()
-            df_str = date_from_var.get().strip()
-            dt_str = date_to_var.get().strip()
-            d_from = None
-            d_to = None
-            from datetime import datetime
-            if df_str:
-                try: d_from = datetime.strptime(df_str, "%m/%d/%Y")
-                except: pass
-            if dt_str:
-                try: d_to = datetime.strptime(dt_str, "%m/%d/%Y")
-                except: pass
-                
-            for idx, r in enumerate(records):
-                inst, dtype, volpg, date, grantor, grantee, legal = r
-                row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
-                if query and query not in row_str:
-                    continue
-                if date and (d_from or d_to):
-                    try:
-                        row_dt = datetime.strptime(date, "%m/%d/%Y")
-                        if d_from and row_dt < d_from: continue
-                        if d_to and row_dt > d_to: continue
-                    except: pass
-                selected_keys.add(idx)
-            refresh_table()
-            
-        def deselect_all():
-            selected_keys.clear()
-            refresh_table()
-            
-        def select_type(type_kw):
-            for idx, r in enumerate(records):
-                dtype = r[1].upper()
-                if type_kw in dtype:
-                    selected_keys.add(idx)
-            refresh_table()
-            
-        tree.bind("<Double-1>", toggle_selection)
-        tree.bind("<space>", toggle_selection)
-        tree.bind("<Button-1>", lambda e: tree.after(50, toggle_selection) if tree.identify_column(e.x) == "#1" else None)
-        filter_var.trace_add("write", refresh_table)
-        date_from_var.trace_add("write", refresh_table)
-        date_to_var.trace_add("write", refresh_table)
-        
-        btn_sel_all.config(command=select_all)
-        btn_desel_all.config(command=deselect_all)
-        btn_sel_deeds.config(command=lambda: select_type("DEED"))
-        btn_sel_leases.config(command=lambda: select_type("LEASE"))
-        btn_sel_mtgs.config(command=lambda: select_type("MORT"))
-        
-        # Bottom action frame
-        bot_frame = ttk.Frame(dialog, padding=(12, 10))
-        bot_frame.pack(fill=tk.X)
-        
-        status_lbl = ttk.Label(bot_frame, text="", font=("Helvetica", 11, "bold"))
-        status_lbl.pack(side=tk.LEFT)
-        
-        progress_bar = ttk.Progressbar(bot_frame, orient=tk.HORIZONTAL, mode="determinate", length=220)
-        
-        def execute_download():
-            if not selected_keys:
-                from tkinter import messagebox
-                messagebox.showwarning("No Selection", "Please select at least one document to download by clicking its row or using Select All.", parent=dialog)
-                return
-                
-            target_fld = folder_var.get().strip() or clean_folder_name
-            target_dir = os.path.join(pid_dir, "DOCS", target_fld)
-            os.makedirs(target_dir, exist_ok=True)
-            
-            selected_records = [records[i] for i in sorted(selected_keys)]
-            
-            btn_dl.config(state=tk.DISABLED)
-            btn_top_dl.config(state=tk.DISABLED)
-            btn_close.config(state=tk.DISABLED)
-            progress_bar.pack(side=tk.LEFT, padx=10)
-            progress_bar['maximum'] = len(selected_records)
-            progress_bar['value'] = 0
-            
-            def download_worker():
-                import concurrent.futures
-                import re
-                
-                items_to_download = []
-                for r in selected_records:
-                    inst, dtype, volpg, date, grantor, grantee, legal = r
-                    m = re.search(r'(\d+)\s*[-/]\s*(\d+)', volpg)
-                    if m:
-                        items_to_download.append((m.group(1), m.group(2), dtype, r))
-                    elif volpg.isdigit():
-                        items_to_download.append((volpg, "1", dtype, r))
-
-                if not items_to_download:
-                    dialog.after(0, lambda: messagebox.showwarning("No Valid Records", "None of the selected records had a valid Volume and Page to download.", parent=dialog))
-                    return
-
-                total_items = len(items_to_download)
-                completed_count = [0]
-
-                def process_item(item_info, worker_idx):
-                    vol, pg, dtype, r = item_info
-                    # 1. Try local drive archive first (instant)
-                    res = self.copy_local_deed(parcel_num, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
-                    if not res:
-                        # 2. Parallel Playwright download from Kofile
-                        self.log(f"Downloading from Kofile (Parallel Worker): {dtype} Vol {vol} Pg {pg}...")
-                        res = self._fetch_kofile_single_doc_worker(vol, pg, dtype, target_dir, stagger_sec=worker_idx * 0.4)
-                    
-                    completed_count[0] += 1
-                    cur = completed_count[0]
-                    dialog.after(0, lambda c=cur, t=dtype, v=vol, p=pg: [
-                        progress_bar.config(value=c),
-                        status_lbl.config(text=f"Downloaded ({c}/{total_items}): {t} {v}-{p}...")
+        def log_msg(msg):
+            self.log(msg)
+            if progress_win and hasattr(progress_win, 'log_text'):
+                try:
+                    progress_win.after(0, lambda m=msg: [
+                        progress_win.log_text.insert(tk.END, f"{m}\n"),
+                        progress_win.log_text.see(tk.END)
                     ])
-                    return res
+                except Exception: pass
 
-                # Run parallel download with 4 concurrent workers
-                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                    futures = [executor.submit(process_item, item, idx % 4) for idx, item in enumerate(items_to_download)]
-                    concurrent.futures.wait(futures)
+        def update_status(text, progress_val=None, max_val=None):
+            if progress_win and hasattr(progress_win, 'status_lbl'):
+                try:
+                    def _update():
+                        progress_win.status_lbl.config(text=text)
+                        if max_val is not None:
+                            progress_win.progress_bar.config(mode="determinate", maximum=max_val)
+                        if progress_val is not None:
+                            progress_win.progress_bar.config(value=progress_val)
+                    progress_win.after(0, _update)
+                except Exception: pass
 
-                def on_done():
-                    btn_dl.config(state=tk.NORMAL)
-                    btn_top_dl.config(state=tk.NORMAL)
-                    btn_close.config(state=tk.NORMAL)
-                    progress_bar.pack_forget()
-                    status_lbl.config(text=f"✅ Finished downloading {completed_count[0]} documents to DOCS/{target_fld}!")
-                    
-                    # Refresh Document Viewer folders
-                    self.update_viewer_folders()
-                    target_combo_val = f"DOCS/{target_fld}"
-                    if target_combo_val in self.viewer_folder_combo['values']:
-                        self.viewer_folder_combo.set(target_combo_val)
-                    self.refresh_viewer_list()
-                    
-                    from tkinter import messagebox
-                    msg = f"Successfully downloaded {completed_count[0]} documents into folder:\nDOCS/{target_fld}/\n\nWould you like to open this folder in Finder?"
-                    if messagebox.askyesno("Download Complete", msg, parent=dialog):
-                        import subprocess, sys
-                        try:
-                            if sys.platform == "darwin":
-                                subprocess.Popen(["open", target_dir])
-                            elif sys.platform == "win32":
-                                os.startfile(target_dir)
-                            else:
-                                subprocess.Popen(["xdg-open", target_dir])
-                        except: pass
-                        
-                dialog.after(0, on_done)
-                
-            import threading
-            threading.Thread(target=download_worker, daemon=True).start()
-            
-        btn_top_dl.config(command=execute_download)
-        
-        btn_close = ttk.Button(bot_frame, text="Close", command=dialog.destroy)
-        btn_close.pack(side=tk.RIGHT, padx=5)
-        
-        btn_dl = ttk.Button(bot_frame, text="⬇️ DOWNLOAD SELECTED (0)", command=execute_download)
-        btn_dl.pack(side=tk.RIGHT, padx=5)
-        
-        # Initial table population
-        refresh_table()
+        log_msg(f"🚀 Starting Automated Title AI Streaming Engine for '{name}'...")
+        log_msg(f"🎯 Target Tract: Lots: '{target_lot}' | Parcel ID: '{target_parcel}' | Last Name: '{last_name}'")
+        log_msg(f"📁 Destination Directory: {target_dir}")
+        update_status(f"Step 1/3: Searching Belmont County records for '{name}'...")
+
+        # -------------------------------------------------------------
+        # STEP 1: Search Public Records on Kofile
+        # -------------------------------------------------------------
+        all_parsed_rows = []
+        seen = set()
+        out_file = os.path.join(target_dir, "Kofile_Name_Search_Results.txt")
+        manifest_file = os.path.join(target_dir, "Search_Results_Manifest.txt")
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context()
+                page = context.new_page()
+                page.goto("https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH", timeout=45000)
+                page.locator("input[value='Login as Guest']").click(no_wait_after=True)
+                page.wait_for_load_state('domcontentloaded')
+                page.wait_for_timeout(1000)
+
+                try:
+                    accept_btn = page.frame_locator("iframe[name='bodyframe']").locator("input#accept")
+                    accept_btn.wait_for(state="visible", timeout=6000)
+                    accept_btn.click()
+                    page.wait_for_load_state('domcontentloaded')
+                    page.wait_for_timeout(600)
+                except Exception: pass
+
+                try:
+                    page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first.click(timeout=6000)
+                except Exception: pass
+                page.wait_for_timeout(1000)
+
+                page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Name").click()
+                page.wait_for_timeout(1000)
+
+                criteria_frame = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").frame_locator("iframe[name='criteriaframe']")
+                try:
+                    criteria_frame.locator("img#clearIcon").click(timeout=1000)
+                except Exception: pass
+
+                criteria_frame.get_by_label("Name", exact=True).fill(name)
+                if start_date:
+                    try:
+                        criteria_frame.locator("input[aria-label='Recorded Date From'].textbox-text, input[name*='From']").first.fill(start_date)
+                    except Exception: pass
+                if end_date:
+                    try:
+                        criteria_frame.locator("input[aria-label='Recorded Date To'].textbox-text, input[name*='To']").first.fill(end_date)
+                    except Exception: pass
+
+                page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").locator("img#imgSearch").click()
+                page.wait_for_timeout(3500)
+
+                reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
+                reslist.locator("body").wait_for(state="visible", timeout=15000)
+
+                # Hydrate virtual DOM
+                for _ in range(3):
+                    reslist.locator("body").evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(800)
+
+                table_data_json = reslist.locator("body").evaluate("""
+                    () => {
+                        let rows = Array.from(document.querySelectorAll('table tr'));
+                        let res = [];
+                        for (let r of rows) {
+                            let cells = Array.from(r.querySelectorAll('th, td'));
+                            let rowVals = cells.map(c => c.innerText.split('\\n').join(' ').trim());
+                            if (rowVals.length >= 6) {
+                                res.push(rowVals);
+                            }
+                        }
+                        return res;
+                    }
+                """)
+
+                for row in table_data_json:
+                    if any("Instrument" in c or "Document Type" in c for c in row):
+                        continue
+                    date_idx = -1
+                    for i, val in enumerate(row):
+                        if re.match(r"^\d{2}/\d{2}/\d{4}$", val.strip()):
+                            date_idx = i
+                            break
+                    if date_idx == -1:
+                        continue
+
+                    inst = row[date_idx - 3].strip() if date_idx >= 3 else ""
+                    vol = row[date_idx - 2].strip() if date_idx >= 2 else ""
+                    pg = row[date_idx - 1].strip() if date_idx >= 1 else ""
+                    date = row[date_idx].strip()
+                    dtype = row[date_idx + 1].strip() if len(row) > date_idx + 1 else ""
+                    name_role = row[date_idx + 2].strip() if len(row) > date_idx + 2 else ""
+                    name_val = row[date_idx + 3].strip() if len(row) > date_idx + 3 else ""
+                    other_role = row[date_idx + 4].strip() if len(row) > date_idx + 4 else ""
+                    other_name = row[date_idx + 5].strip() if len(row) > date_idx + 5 else ""
+                    legal = row[date_idx + 6].strip() if len(row) > date_idx + 6 else ""
+
+                    grantor = ""
+                    grantee = ""
+                    if name_role == "R": grantor = name_val
+                    elif name_role in ("E", "D"): grantee = name_val
+                    if other_role == "R": grantor = other_name if not grantor else f"{grantor} & {other_name}"
+                    elif other_role in ("E", "D"): grantee = other_name if not grantee else f"{grantee} & {other_name}"
+
+                    volpg = f"{vol}/{pg}" if vol and pg else vol or pg
+                    key = (inst, volpg, date, dtype, grantor, grantee)
+                    if key not in seen:
+                        seen.add(key)
+                        all_parsed_rows.append((inst, dtype, volpg, date, grantor, grantee, legal))
+
+                browser.close()
+        except Exception as e:
+            log_msg(f"❌ Kofile search error: {e}")
+
+        # Save manifests
+        try:
+            with open(out_file, "w") as f:
+                f.write(f"--- Results for: {name} ({start_date or 'All'} to {end_date or 'Present'}) ---\n")
+                if all_parsed_rows:
+                    f.write(f"Found {len(all_parsed_rows)} documents:\n")
+                    for r in all_parsed_rows:
+                        f.write(f"  [{r[1]}] Vol/Pg: {r[2]} | Date: {r[3]} | Grantor: {r[4]} | Grantee: {r[5]} | Legal: {r[6]}\n")
+                else:
+                    f.write("  No documents found.\n")
+
+            with open(manifest_file, "w") as f:
+                for r in all_parsed_rows:
+                    f.write(f"[{r[1]}] Vol/Pg: {r[2]} | Date: {r[3]} | Grantor: {r[4]} | Grantee: {r[5]} | Legal: {r[6]}\n")
+        except Exception: pass
+
+        if not all_parsed_rows:
+            log_msg(f"⚠️ No documents found on Belmont County Recorder for '{name}'.")
+            update_status(f"Search complete: 0 records found for '{name}'.", progress_val=0, max_val=1)
+            if hasattr(self, 'root'):
+                self.root.after(0, lambda: messagebox.showinfo("No Results", f"No documents found on Kofile for '{name}'.", parent=self.root))
+            return
+
+        log_msg(f"📦 Total Search Results: {len(all_parsed_rows)} records found.")
+
+        # -------------------------------------------------------------
+        # STEP 2: Deduplicate Book/Pages & Setup Queues
+        # -------------------------------------------------------------
+        items_to_download = []
+        seen_bp = set()
+        for r in all_parsed_rows:
+            inst, dtype, volpg, date, grantor, grantee, legal = r
+            m = re.search(r'(\d+)\s*[-/]\s*(\d+)', volpg)
+            if m:
+                v, p = m.group(1), m.group(2)
+                if (v, p) not in seen_bp:
+                    seen_bp.add((v, p))
+                    items_to_download.append((v, p, dtype, r))
+            elif volpg.isdigit():
+                if (volpg, "1") not in seen_bp:
+                    seen_bp.add((volpg, "1"))
+                    items_to_download.append((volpg, "1", dtype, r))
+
+        total_docs = len(items_to_download)
+        log_msg(f"⚡ Unique Documents to Download & Screen: {total_docs}")
+        update_status(f"Step 2/3: Streaming Downloads & AI Screening (0 / {total_docs})...", progress_val=0, max_val=total_docs)
+
+        download_queue = queue.Queue()
+        for item in items_to_download:
+            download_queue.put(item)
+
+        ai_queue = queue.Queue()
+        all_ai_results = []
+        results_lock = threading.Lock()
+        download_complete_event = threading.Event()
+        completed_downloads = [0]
+
+        # Init Gemini
+        client = None
+        try:
+            cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+            with open(cfg_path) as f:
+                api_key = json.load(f)["GEMINI_API_KEY"]
+            client = genai.Client(api_key=api_key)
+        except Exception as e:
+            log_msg(f"⚠️ Gemini Client init warning: {e}")
+
+        # -------------------------------------------------------------
+        # STEP 3: AI Screening Worker (Direct Byte Inlining)
+        # -------------------------------------------------------------
+        def screen_doc(pdf_path, doc_type):
+            if not client:
+                return {"filename": os.path.basename(pdf_path), "filepath": pdf_path, "is_direct_hit": False, "referenced_prior_vol_pgs": []}
+            fn = os.path.basename(pdf_path)
+            try:
+                t0_ai = time.time()
+                with open(pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
+
+                prompt = f"""
+                You are an expert real estate, oil & gas title attorney examining title records from Belmont County, Ohio.
+                Examine this entire document carefully, including Page 1, Page 2, Page 3, and any attached EXHIBIT "A", EXHIBIT "B", Legal Schedules, or Parcel Tables.
+
+                TARGET SEARCH OBJECTIVES:
+                1. Check if this document conveys, leases, encumbers, ratifies, assigns, or references:
+                   - Target Lot(s): "{target_lot}" (including In-Lot, Out-Lot, or Lot numbers)
+                   - Target Parcel ID(s): "{target_parcel}"
+                2. OIL & GAS LEASE SPECIAL INSTRUCTION:
+                   - Carefully read all tabular columns in Exhibit "A" / Exhibit "B" schedules. Look for matching Lots, Parcels, or Prior Deed references.
+                3. MORTGAGES & LIENS:
+                   - Does this mortgage encumber the target Lot or Parcel?
+                4. RELEASES / SATISFACTIONS / ASSIGNMENTS:
+                   - What original Mortgage or Lease Book/Volume and Page numbers does this document release, assign, modify, or satisfy?
+
+                Return a strict JSON object:
+                {{
+                  "is_direct_hit": true or false,
+                  "hit_reasons": ["List matching reasons"],
+                  "lots_found": ["List all lot numbers"],
+                  "parcels_found": ["List all parcel IDs"],
+                  "document_type": "{doc_type}",
+                  "recorded_date": "MM/DD/YYYY if visible",
+                  "grantor": "Grantor / Direct Party",
+                  "grantee": "Grantee / Reverse Party",
+                  "is_mortgage": true or false,
+                  "referenced_prior_vol_pgs": ["List referenced prior deed, mortgage, or lease Vol/Pg numbers (e.g. '865/633', '618/161')"],
+                  "legal_summary": "1-2 sentence concise summary of the land or tract description",
+                  "exact_excerpt": "Exact text or table line from document"
+                }}
+                """
+                res = client.models.generate_content(
+                    model='gemini-3.6-flash',
+                    contents=[types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), prompt],
+                    config={"response_mime_type": "application/json"}
+                )
+                data = json.loads(res.text.strip())
+                data["filename"] = fn
+                data["filepath"] = pdf_path
+                data["ai_time"] = round(time.time() - t0_ai, 1)
+                return data
+            except Exception as e:
+                return {"filename": fn, "filepath": pdf_path, "is_direct_hit": False, "hit_reasons": [str(e)], "referenced_prior_vol_pgs": []}
+
+        def extract_volpg_regex(pdf_path):
+            import fitz
+            refs = set()
+            try:
+                doc = fitz.open(pdf_path)
+                text = " ".join([page.get_text() for page in doc])
+                m = re.findall(r'(?:VOL(?:UME)?\.?|BOOK)\s*#?\s*(\d{1,4})\s*(?:AT\s*)?(?:PAGE|PG\.?)\s*#?\s*(\d{1,4})', text, re.IGNORECASE)
+                for v, p in m:
+                    refs.add(f"{int(v)}/{int(p)}")
+                    refs.add(f"{v}/{p}")
+            except: pass
+            return list(refs)
+
+        def ai_consumer(worker_id):
+            while not download_complete_event.is_set() or not ai_queue.empty():
+                try:
+                    pdf_path, doc_type = ai_queue.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+
+                data = screen_doc(pdf_path, doc_type)
+                regex_refs = extract_volpg_regex(pdf_path)
+                existing_refs = data.get("referenced_prior_vol_pgs", [])
+                for rf in regex_refs:
+                    if rf not in existing_refs:
+                        existing_refs.append(rf)
+                data["referenced_prior_vol_pgs"] = existing_refs
+
+                is_hit = data.get("is_direct_hit", False)
+                fn = os.path.basename(pdf_path)
+                t_ai = data.get("ai_time", 0)
+                if is_hit:
+                    log_msg(f"⭐ [AI-{worker_id}] CONFIRMED HIT in {t_ai}s: {fn}")
+                else:
+                    log_msg(f"⏭️ [AI-{worker_id}] Non-Target Tract ({t_ai}s): {fn}")
+
+                with results_lock:
+                    all_ai_results.append(data)
+                ai_queue.task_done()
+
+        ai_threads = []
+        for i in range(4):
+            t = threading.Thread(target=ai_consumer, args=(i+1,), daemon=True)
+            t.start()
+            ai_threads.append(t)
+
+        # -------------------------------------------------------------
+        # STEP 4: Parallel Scraper Producers (5 Workers)
+        # -------------------------------------------------------------
+        def scraper_producer(worker_id):
+            time.sleep(worker_id * 0.4)
+            while True:
+                try:
+                    vol, pg, dtype, r = download_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                res = self.copy_local_deed(target_parcel, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
+                clean_type = "".join(c for c in dtype if c.isalnum() or c in " _-").strip() or "DOC"
+                expected_pdf = os.path.join(target_dir, f"{vol}-{pg} {clean_type}.pdf")
+
+                if not res:
+                    log_msg(f"⬇️ [Worker-{worker_id}] Downloading Kofile: {dtype} Vol {vol} Pg {pg}...")
+                    res = self._fetch_kofile_single_doc_worker(vol, pg, dtype, target_dir, last_name=last_name)
+
+                if res and os.path.exists(expected_pdf):
+                    ai_queue.put((expected_pdf, dtype))
+                    log_msg(f"✅ [Worker-{worker_id}] Downloaded: {os.path.basename(expected_pdf)}")
+
+                completed_downloads[0] += 1
+                cur = completed_downloads[0]
+                update_status(f"Step 2/3: Streaming Downloads & AI Screening ({cur} / {total_docs})...", progress_val=cur, max_val=total_docs)
+                download_queue.task_done()
+
+        scraper_threads = []
+        for i in range(5):
+            t = threading.Thread(target=scraper_producer, args=(i+1,), daemon=True)
+            t.start()
+            scraper_threads.append(t)
+
+        for t in scraper_threads:
+            t.join()
+
+        download_complete_event.set()
+        for t in ai_threads:
+            t.join()
+
+        # -------------------------------------------------------------
+        # STEP 5: Relational Linking & Hits Isolation
+        # -------------------------------------------------------------
+        update_status("Step 3/3: Evaluating relational links and isolating confirmed hits...")
+        log_msg("🔗 Resolving relational cross-references (Releases, Satisfactions, Amendments)...")
+
+        confirmed_hits = []
+        confirmed_vol_pgs = set()
+
+        for res in all_ai_results:
+            fn = res.get("filename", "")
+            m = re.match(r'(\d+)-(\d+)', fn)
+            if m:
+                vp = f"{m.group(1)}/{m.group(2)}"
+                if res.get("is_direct_hit"):
+                    confirmed_hits.append(res)
+                    confirmed_vol_pgs.add(vp)
+
+        # Relational pass
+        for res in all_ai_results:
+            fn = res.get("filename", "")
+            if res.get("is_direct_hit"):
+                continue
+            refs = res.get("referenced_prior_vol_pgs", [])
+            for rf in refs:
+                if rf in confirmed_vol_pgs:
+                    res["is_relational_hit"] = True
+                    res["relational_reason"] = f"References confirmed hit {rf}"
+                    confirmed_hits.append(res)
+                    m = re.match(r'(\d+)-(\d+)', fn)
+                    if m: confirmed_vol_pgs.add(f"{m.group(1)}/{m.group(2)}")
+                    log_msg(f"🔗 Relational Link Confirmed: {fn} (Linked via {rf})")
+                    break
+
+        # Copy Hits to Hits/
+        for hit in confirmed_hits:
+            src = hit.get("filepath", "")
+            if src and os.path.exists(src):
+                dst = os.path.join(hits_dir, os.path.basename(src))
+                shutil.copy2(src, dst)
+
+        # Generate Markdown Report
+        report_path = os.path.join(target_dir, "Title_AI_Hits_Report.md")
+        try:
+            with open(report_path, "w") as f:
+                f.write(f"# 📋 Belmont County Title AI Screening Report\n\n")
+                f.write(f"- **Party Name**: {name}\n")
+                f.write(f"- **Target Lot(s)**: {target_lot or 'All'}\n")
+                f.write(f"- **Target Parcel**: {target_parcel}\n")
+                f.write(f"- **Total Documents Examined**: {total_docs}\n")
+                f.write(f"- **Confirmed Title Hits**: {len(confirmed_hits)}\n")
+                f.write(f"- **Execution Time**: {round(time.time() - t_start, 2)} seconds\n\n")
+                f.write(f"## 🎯 Confirmed Hits Summary\n\n")
+                for hit in confirmed_hits:
+                    fn = hit.get("filename", "")
+                    dt = hit.get("document_type", "DOC")
+                    reasons = ", ".join(hit.get("hit_reasons", [])) or hit.get("relational_reason", "Direct Hit")
+                    f.write(f"### `{fn}` — {dt}\n")
+                    f.write(f"- **Match Basis**: {reasons}\n")
+                    f.write(f"- **Legal Excerpt**: {hit.get('legal_summary', hit.get('exact_excerpt', 'N/A'))}\n\n")
+        except Exception: pass
+
+        duration = round(time.time() - t_start, 1)
+        log_msg("=" * 70)
+        log_msg(f"🎉 TITLE AI STREAMING COMPLETE in {duration}s!")
+        log_msg(f"📦 Total Examined: {total_docs} | ⭐ Confirmed Hits: {len(confirmed_hits)}")
+        log_msg(f"📁 Hits Saved to: DOCS/{clean_folder_name}/Hits/")
+        log_msg("=" * 70)
+
+        update_status(f"🎉 Complete in {duration}s! Confirmed Hits: {len(confirmed_hits)} / {total_docs}", progress_val=total_docs, max_val=total_docs)
+
+        # Refresh Document Viewer & select Hits folder
+        if hasattr(self, 'root'):
+            def update_ui_viewer():
+                self.update_viewer_folders()
+                hits_fld = f"DOCS/{clean_folder_name}/Hits"
+                if hits_fld in self.viewer_folder_combo['values']:
+                    self.viewer_folder_combo.set(hits_fld)
+                else:
+                    self.viewer_folder_combo.set(f"DOCS/{clean_folder_name}")
+                self.refresh_viewer_list()
+
+                from tkinter import messagebox
+                msg = (
+                    f"🎉 Title Examination & AI Triage Complete in {duration}s!\n\n"
+                    f"• Party: {name}\n"
+                    f"• Examined: {total_docs} documents\n"
+                    f"• Confirmed Hits: {len(confirmed_hits)} documents\n\n"
+                    f"Hits are isolated in:\nDOCS/{clean_folder_name}/Hits/\n\n"
+                    "Would you like to open the Hits folder in Finder?"
+                )
+                if messagebox.askyesno("AI Triage Complete", msg, parent=self.root):
+                    import subprocess, sys
+                    try:
+                        if sys.platform == "darwin":
+                            subprocess.Popen(["open", hits_dir])
+                        elif sys.platform == "win32":
+                            os.startfile(hits_dir)
+                        else:
+                            subprocess.Popen(["xdg-open", hits_dir])
+                    except Exception: pass
+
+            self.root.after(0, update_ui_viewer)
 
     def _fetch_court_name_search(self, search_params, pid_dir):
         if not search_params:
@@ -5042,11 +4548,12 @@ end tell'''
         pid = self.parcel_entry.get().strip()
         if not pid:
             from tkinter import messagebox
-            messagebox.showerror("Error", "Please enter a Parcel Number (PID) first.")
+            messagebox.showerror("Error", "Please enter a Parcel Number (PID) first.", parent=self.root)
             return
             
         pid_dir = self.get_parcel_dir(pid)
         docs_dir = os.path.join(pid_dir, "DOCS")
+        os.makedirs(docs_dir, exist_ok=True)
         out_file = os.path.join(docs_dir, "Kofile_Name_Search_Results.txt")
         
         history_names = []
@@ -5060,71 +4567,78 @@ end tell'''
             except: pass
             
         dialog = tk.Toplevel(self.root)
-        dialog.title("Kofile Name Search & AI Triage")
-        dialog.geometry("480x360")
+        dialog.title("⚡ Kofile Name Search & Automated AI Triage")
+        dialog.geometry("520x400")
         dialog.transient(self.root)
         
         active_pid = self.parcel_entry.get().strip() if hasattr(self, 'parcel_entry') else ""
         
-        ttk.Label(dialog, text="Party Name (e.g. McLaughlin Douglas):", font=("Helvetica", 11, "bold")).pack(pady=(12, 4), anchor=tk.W, padx=20)
+        top_banner = ttk.Frame(dialog, padding=(16, 12))
+        top_banner.pack(fill=tk.X)
+        ttk.Label(top_banner, text="⚡ Belmont County Title Streamer & AI Triage", font=("Helvetica", 13, "bold")).pack(anchor=tk.W)
+        ttk.Label(top_banner, text="Automatically searches public records, downloads PDFs with parallel workers,\nand runs Gemini 3.6 Flash multimodal AI screening to isolate confirmed tract hits.", foreground="#4a5568").pack(anchor=tk.W, pady=(2, 0))
+        
+        form_frame = ttk.Frame(dialog, padding=(16, 4))
+        form_frame.pack(fill=tk.X)
+        
+        ttk.Label(form_frame, text="Party Name (e.g. McLaughlin Douglas):", font=("Helvetica", 11, "bold")).pack(anchor=tk.W, pady=(4, 2))
         name_var = tk.StringVar()
-        name_cb = ttk.Combobox(dialog, textvariable=name_var, values=history_names)
-        name_cb.pack(fill=tk.X, padx=20)
+        name_cb = ttk.Combobox(form_frame, textvariable=name_var, values=history_names, font=("Helvetica", 11))
+        name_cb.pack(fill=tk.X, pady=(0, 8))
         if history_names:
             name_cb.set(history_names[0])
             
-        frame = ttk.Frame(dialog)
-        frame.pack(fill=tk.X, padx=20, pady=10)
+        date_frame = ttk.Frame(form_frame)
+        date_frame.pack(fill=tk.X, pady=4)
         
-        ttk.Label(frame, text="Start Date:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        ttk.Label(date_frame, text="Start Date:").grid(row=0, column=0, sticky=tk.W, pady=3)
         start_date_var = tk.StringVar(value="01/01/1980")
-        ttk.Entry(frame, textvariable=start_date_var, width=14).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
+        ttk.Entry(date_frame, textvariable=start_date_var, width=13, font=("Helvetica", 10)).grid(row=0, column=1, sticky=tk.W, padx=(4, 15), pady=3)
         
-        ttk.Label(frame, text="End Date:").grid(row=0, column=2, sticky=tk.W, padx=(10, 0), pady=3)
+        ttk.Label(date_frame, text="End Date:").grid(row=0, column=2, sticky=tk.W, pady=3)
         from datetime import datetime
         today_str = datetime.now().strftime("%m/%d/%Y")
         end_date_var = tk.StringVar(value=today_str)
-        ttk.Entry(frame, textvariable=end_date_var, width=14).grid(row=0, column=3, sticky=tk.W, padx=5, pady=3)
+        ttk.Entry(date_frame, textvariable=end_date_var, width=13, font=("Helvetica", 10)).grid(row=0, column=3, sticky=tk.W, padx=4, pady=3)
         
-        # Target Lot & Parcel Criteria for AI Screening
-        t_frame = ttk.LabelFrame(dialog, text="🎯 Target Tract Filter (Optional AI Screening)", padding=8)
-        t_frame.pack(fill=tk.X, padx=20, pady=6)
+        # Target Tract Criteria Frame
+        t_frame = ttk.LabelFrame(form_frame, text="🎯 Target Tract Criteria (AI Screening Filter)", padding=10)
+        t_frame.pack(fill=tk.X, pady=8)
         
         ttk.Label(t_frame, text="Target Lot(s):").grid(row=0, column=0, sticky=tk.W, pady=3)
         target_lot_var = tk.StringVar(value="")
-        ttk.Entry(t_frame, textvariable=target_lot_var, width=14).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
+        ttk.Entry(t_frame, textvariable=target_lot_var, width=13, font=("Helvetica", 10)).grid(row=0, column=1, sticky=tk.W, padx=(4, 15), pady=3)
         
-        ttk.Label(t_frame, text="Parcel ID:").grid(row=0, column=2, sticky=tk.W, padx=(10, 0), pady=3)
+        ttk.Label(t_frame, text="Parcel ID:").grid(row=0, column=2, sticky=tk.W, pady=3)
         target_parcel_var = tk.StringVar(value=active_pid)
-        ttk.Entry(t_frame, textvariable=target_parcel_var, width=14).grid(row=0, column=3, sticky=tk.W, padx=5, pady=3)
+        ttk.Entry(t_frame, textvariable=target_parcel_var, width=15, font=("Helvetica", 10)).grid(row=0, column=3, sticky=tk.W, padx=4, pady=3)
         
         def on_search():
             name = name_var.get().strip()
-            if not name: return
+            if not name:
+                from tkinter import messagebox
+                messagebox.showwarning("Missing Name", "Please enter a Party Name to search.", parent=dialog)
+                return
             start = start_date_var.get().strip()
             end = end_date_var.get().strip()
             lot_crit = target_lot_var.get().strip()
             parcel_crit = target_parcel_var.get().strip()
             dialog.destroy()
             
-            from tkinter import messagebox
-            messagebox.showinfo("Search Started", f"Starting Kofile Name Search for '{name}'...\n\nA results window with 1-click Download & AI Triage will appear automatically once Kofile finishes loading.", parent=self.root)
+            # Launch Live Progress Window
+            prog_win = KofileStreamingProgressWindow(self.root, name)
             
-            search_params = [{
-                "name": name, 
-                "acquisition_date": start, 
-                "disposal_date": end, 
-                "exact_dates": True,
-                "target_lot": lot_crit,
-                "target_parcel": parcel_crit
-            }]
             import threading
-            threading.Thread(target=self._fetch_kofile_name_search, args=(search_params, pid_dir), daemon=True).start()
+            threading.Thread(
+                target=self._run_kofile_streaming_pipeline,
+                args=(name, start, end, lot_crit, parcel_crit, pid_dir, prog_win),
+                daemon=True
+            ).start()
             
-        btn_box = ttk.Frame(dialog)
-        btn_box.pack(pady=12)
-        ttk.Button(btn_box, text="🔎 Search Public Records", command=on_search, style="Accent.TButton").pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_box, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        btn_box = ttk.Frame(dialog, padding=(16, 12))
+        btn_box.pack(fill=tk.X)
+        ttk.Button(btn_box, text="⚡ Start Search & AI Triage", command=on_search, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_box, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT)
 
     def open_quick_log_mortgage(self):
         vol = self.org_vol_entry.get().strip()
