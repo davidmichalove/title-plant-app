@@ -3878,38 +3878,56 @@ end tell'''
         folder_entry.pack(side=tk.LEFT, padx=5)
         
         # Filter and selection control toolbar
-        toolbar = ttk.Frame(dialog, padding=(12, 4))
-        toolbar.pack(fill=tk.X)
+        toolbar1 = ttk.Frame(dialog, padding=(12, 4))
+        toolbar1.pack(fill=tk.X)
         
-        ttk.Label(toolbar, text="Filter:").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(toolbar1, text="Filter:", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(0, 3))
         filter_var = tk.StringVar()
-        filter_entry = ttk.Entry(toolbar, textvariable=filter_var, width=20)
+        filter_entry = ttk.Entry(toolbar1, textvariable=filter_var, width=15, font=("Helvetica", 11))
         filter_entry.pack(side=tk.LEFT, padx=(0, 8))
         
-        btn_sel_all = ttk.Button(toolbar, text="Select All", width=10)
+        ttk.Label(toolbar1, text="Date From:", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(4, 3))
+        date_from_var = tk.StringVar()
+        date_from_entry = ttk.Entry(toolbar1, textvariable=date_from_var, width=11, font=("Helvetica", 11))
+        date_from_entry.pack(side=tk.LEFT, padx=(0, 4))
+        
+        ttk.Label(toolbar1, text="To:", font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(4, 3))
+        date_to_var = tk.StringVar()
+        date_to_entry = ttk.Entry(toolbar1, textvariable=date_to_var, width=11, font=("Helvetica", 11))
+        date_to_entry.pack(side=tk.LEFT, padx=(0, 8))
+        
+        btn_top_dl = ttk.Button(toolbar1, text="⬇️ DOWNLOAD SELECTED (0)")
+        btn_top_dl.pack(side=tk.RIGHT, padx=2)
+        
+        count_lbl = ttk.Label(toolbar1, text="Selected: 0 of 0", font=("Helvetica", 12, "bold"), foreground=count_color)
+        count_lbl.pack(side=tk.RIGHT, padx=8)
+        
+        # Toolbar 2: Quick Type Presets
+        toolbar2 = ttk.Frame(dialog, padding=(12, 2))
+        toolbar2.pack(fill=tk.X)
+        
+        ttk.Label(toolbar2, text="Quick Select:", font=("Helvetica", 10, "italic"), foreground=sub_color).pack(side=tk.LEFT, padx=(0, 4))
+        btn_sel_all = ttk.Button(toolbar2, text="Select All", width=10)
         btn_sel_all.pack(side=tk.LEFT, padx=2)
         
-        btn_desel_all = ttk.Button(toolbar, text="Deselect All", width=11)
+        btn_desel_all = ttk.Button(toolbar2, text="Deselect All", width=11)
         btn_desel_all.pack(side=tk.LEFT, padx=2)
         
-        btn_sel_deeds = ttk.Button(toolbar, text="Only Deeds", width=11)
+        btn_sel_deeds = ttk.Button(toolbar2, text="Only Deeds", width=11)
         btn_sel_deeds.pack(side=tk.LEFT, padx=2)
         
-        btn_sel_leases = ttk.Button(toolbar, text="Only Leases", width=11)
+        btn_sel_leases = ttk.Button(toolbar2, text="Only Leases", width=11)
         btn_sel_leases.pack(side=tk.LEFT, padx=2)
         
-        btn_sel_mtgs = ttk.Button(toolbar, text="Only Mortgages", width=13)
+        btn_sel_mtgs = ttk.Button(toolbar2, text="Only Mortgages", width=13)
         btn_sel_mtgs.pack(side=tk.LEFT, padx=2)
-        
-        count_lbl = ttk.Label(toolbar, text="Selected: 0 of 0", font=("Helvetica", 11, "bold"), foreground=count_color)
-        count_lbl.pack(side=tk.RIGHT, padx=5)
         
         import textwrap
         
         # Style configuration with generous row height for multi-line wrapped text
         tree_style = ttk.Style(dialog)
-        tree_style.configure("NameSearch.Treeview", rowheight=44, font=("Helvetica", 11))
-        tree_style.configure("NameSearch.Treeview.Heading", font=("Helvetica", 11, "bold"))
+        tree_style.configure("NameSearch.Treeview", rowheight=52, font=("Helvetica", 12))
+        tree_style.configure("NameSearch.Treeview.Heading", font=("Helvetica", 12, "bold"))
 
         # Treeview Frame
         tree_frame = ttk.Frame(dialog, padding=(12, 4))
@@ -3927,12 +3945,12 @@ end tell'''
         tree.heading("legal", text="Legal / Description Notes")
         
         tree.column("sel", width=50, minwidth=40, anchor=tk.CENTER, stretch=False)
-        tree.column("type", width=120, minwidth=85, anchor=tk.W, stretch=False)
-        tree.column("volpg", width=85, minwidth=70, anchor=tk.CENTER, stretch=False)
-        tree.column("date", width=90, minwidth=75, anchor=tk.CENTER, stretch=False)
+        tree.column("type", width=130, minwidth=90, anchor=tk.W, stretch=False)
+        tree.column("volpg", width=95, minwidth=75, anchor=tk.CENTER, stretch=False)
+        tree.column("date", width=95, minwidth=75, anchor=tk.CENTER, stretch=False)
         tree.column("grantor", width=180, minwidth=110, anchor=tk.W, stretch=False)
         tree.column("grantee", width=180, minwidth=110, anchor=tk.W, stretch=False)
-        tree.column("legal", width=380, minwidth=220, anchor=tk.W, stretch=True)
+        tree.column("legal", width=420, minwidth=240, anchor=tk.W, stretch=True)
         
         sb_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
         sb_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=tree.xview)
@@ -3949,12 +3967,12 @@ end tell'''
         tree.tag_configure("checked", background=bg_checked, foreground=fg_checked)
         
         # Details / Legal Notes Inspector Panel
-        details_frame = ttk.LabelFrame(dialog, text="Document Details & Legal Description", padding=(8, 6))
+        details_frame = ttk.LabelFrame(dialog, text="📄 Document Details & Legal Description (Full Inspector)", padding=(8, 6))
         details_frame.pack(fill=tk.X, padx=12, pady=(2, 6))
         
-        details_text = tk.Text(details_frame, height=3, wrap=tk.WORD, font=("Helvetica", 11), bg=bg_odd, fg=fg_text, relief=tk.FLAT, padx=6, pady=4, highlightthickness=0)
+        details_text = tk.Text(details_frame, height=4, wrap=tk.WORD, font=("Helvetica", 13), bg=bg_odd, fg=fg_text, relief=tk.FLAT, padx=8, pady=4, highlightthickness=0)
         details_text.pack(fill=tk.X, expand=True)
-        details_text.insert("1.0", "💡 Select any document in the table above to view complete legal notes and details.")
+        details_text.insert("1.0", "💡 Select any document in the table above to inspect full legal notes and details in larger font.")
         details_text.config(state=tk.DISABLED)
         
         def on_tree_select(event=None):
@@ -3976,23 +3994,47 @@ end tell'''
         
         def refresh_table(*args):
             query = filter_var.get().lower().strip()
+            df_str = date_from_var.get().strip()
+            dt_str = date_to_var.get().strip()
+            
+            d_from = None
+            d_to = None
+            from datetime import datetime
+            if df_str:
+                try: d_from = datetime.strptime(df_str, "%m/%d/%Y")
+                except: pass
+            if dt_str:
+                try: d_to = datetime.strptime(dt_str, "%m/%d/%Y")
+                except: pass
+                
             tree.delete(*tree.get_children())
             visible_count = 0
             for idx, r in enumerate(records):
                 inst, dtype, volpg, date, grantor, grantee, legal = r
+                
                 row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
                 if query and query not in row_str:
                     continue
+                    
+                if date and (d_from or d_to):
+                    try:
+                        row_dt = datetime.strptime(date, "%m/%d/%Y")
+                        if d_from and row_dt < d_from: continue
+                        if d_to and row_dt > d_to: continue
+                    except: pass
                     
                 is_checked = idx in selected_keys
                 check_mark = "[ ✓ ]" if is_checked else "[   ]"
                 tag = "checked" if is_checked else ("even" if visible_count % 2 == 0 else "odd")
                 
-                wrapped_legal = textwrap.fill(legal, width=48) if legal else ""
+                wrapped_legal = textwrap.fill(legal, width=44) if legal else ""
                 tree.insert("", tk.END, iid=str(idx), values=(check_mark, dtype, volpg, date, grantor, grantee, wrapped_legal), tags=(tag,))
                 visible_count += 1
                 
-            count_lbl.config(text=f"Selected: {len(selected_keys)} of {len(records)} ({visible_count} visible)")
+            sel_n = len(selected_keys)
+            count_lbl.config(text=f"Selected: {sel_n} of {len(records)} ({visible_count} visible)")
+            btn_top_dl.config(text=f"⬇️ DOWNLOAD SELECTED ({sel_n})")
+            btn_dl.config(text=f"⬇️ DOWNLOAD SELECTED ({sel_n})")
             
         def toggle_selection(event=None):
             selected_items = tree.selection()
@@ -4007,14 +4049,30 @@ end tell'''
             
         def select_all():
             query = filter_var.get().lower().strip()
+            df_str = date_from_var.get().strip()
+            dt_str = date_to_var.get().strip()
+            d_from = None
+            d_to = None
+            from datetime import datetime
+            if df_str:
+                try: d_from = datetime.strptime(df_str, "%m/%d/%Y")
+                except: pass
+            if dt_str:
+                try: d_to = datetime.strptime(dt_str, "%m/%d/%Y")
+                except: pass
+                
             for idx, r in enumerate(records):
-                if query:
-                    inst, dtype, volpg, date, grantor, grantee, legal = r
-                    row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
-                    if query in row_str:
-                        selected_keys.add(idx)
-                else:
-                    selected_keys.add(idx)
+                inst, dtype, volpg, date, grantor, grantee, legal = r
+                row_str = f"{dtype} {volpg} {date} {grantor} {grantee} {legal} {inst}".lower()
+                if query and query not in row_str:
+                    continue
+                if date and (d_from or d_to):
+                    try:
+                        row_dt = datetime.strptime(date, "%m/%d/%Y")
+                        if d_from and row_dt < d_from: continue
+                        if d_to and row_dt > d_to: continue
+                    except: pass
+                selected_keys.add(idx)
             refresh_table()
             
         def deselect_all():
@@ -4032,6 +4090,8 @@ end tell'''
         tree.bind("<space>", toggle_selection)
         tree.bind("<Button-1>", lambda e: tree.after(50, toggle_selection) if tree.identify_column(e.x) == "#1" else None)
         filter_var.trace_add("write", refresh_table)
+        date_from_var.trace_add("write", refresh_table)
+        date_to_var.trace_add("write", refresh_table)
         
         btn_sel_all.config(command=select_all)
         btn_desel_all.config(command=deselect_all)
@@ -4043,7 +4103,7 @@ end tell'''
         bot_frame = ttk.Frame(dialog, padding=(12, 10))
         bot_frame.pack(fill=tk.X)
         
-        status_lbl = ttk.Label(bot_frame, text="", font=("Helvetica", 10))
+        status_lbl = ttk.Label(bot_frame, text="", font=("Helvetica", 11, "bold"))
         status_lbl.pack(side=tk.LEFT)
         
         progress_bar = ttk.Progressbar(bot_frame, orient=tk.HORIZONTAL, mode="determinate", length=220)
@@ -4051,7 +4111,7 @@ end tell'''
         def execute_download():
             if not selected_keys:
                 from tkinter import messagebox
-                messagebox.showwarning("No Selection", "Please select at least one document to download.", parent=dialog)
+                messagebox.showwarning("No Selection", "Please select at least one document to download by clicking its row or using Select All.", parent=dialog)
                 return
                 
             target_fld = folder_var.get().strip() or clean_folder_name
@@ -4061,6 +4121,7 @@ end tell'''
             selected_records = [records[i] for i in sorted(selected_keys)]
             
             btn_dl.config(state=tk.DISABLED)
+            btn_top_dl.config(state=tk.DISABLED)
             btn_close.config(state=tk.DISABLED)
             progress_bar.pack(side=tk.LEFT, padx=10)
             progress_bar['maximum'] = len(selected_records)
@@ -4097,6 +4158,7 @@ end tell'''
                     
                 def on_done():
                     btn_dl.config(state=tk.NORMAL)
+                    btn_top_dl.config(state=tk.NORMAL)
                     btn_close.config(state=tk.NORMAL)
                     progress_bar.pack_forget()
                     status_lbl.config(text=f"✅ Finished downloading {downloaded_count} documents to DOCS/{target_fld}!")
@@ -4126,10 +4188,12 @@ end tell'''
             import threading
             threading.Thread(target=download_worker, daemon=True).start()
             
+        btn_top_dl.config(command=execute_download)
+        
         btn_close = ttk.Button(bot_frame, text="Close", command=dialog.destroy)
         btn_close.pack(side=tk.RIGHT, padx=5)
         
-        btn_dl = ttk.Button(bot_frame, text="⬇️ Download Selected Documents", command=execute_download)
+        btn_dl = ttk.Button(bot_frame, text="⬇️ DOWNLOAD SELECTED (0)", command=execute_download)
         btn_dl.pack(side=tk.RIGHT, padx=5)
         
         # Initial table population
