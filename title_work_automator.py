@@ -3882,6 +3882,30 @@ end tell'''
         folder_entry = ttk.Entry(folder_frame, textvariable=folder_var, width=32, font=("Helvetica", 11))
         folder_entry.pack(side=tk.LEFT, padx=5)
         
+        # Target Tract Criteria Frame (Lot and Parcel ID)
+        crit_frame = ttk.LabelFrame(top_frame, text="🎯 Target Tract Criteria (For 1-Click AI Hits Triage)", padding=6)
+        crit_frame.pack(fill=tk.X, pady=(4, 2))
+        
+        ttk.Label(crit_frame, text="Target Lot(s):").pack(side=tk.LEFT, padx=(4, 2))
+        lot_var = tk.StringVar(value="")
+        lot_entry = ttk.Entry(crit_frame, textvariable=lot_var, width=12, font=("Helvetica", 11))
+        lot_entry.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(crit_frame, text="Parcel ID:").pack(side=tk.LEFT, padx=(4, 2))
+        parcel_var = tk.StringVar(value=parcel_num)
+        parcel_entry = ttk.Entry(crit_frame, textvariable=parcel_var, width=16, font=("Helvetica", 11))
+        parcel_entry.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(crit_frame, text="Last Name Filter:").pack(side=tk.LEFT, padx=(4, 2))
+        # Extract last name from owner_name
+        last_name_cand = owner_name.split()[0] if owner_name else ""
+        if len(owner_name.split()) > 1 and owner_name.split()[1] and not owner_name.split()[0].endswith(","):
+            # Could be First Last
+            last_name_cand = owner_name.split()[-1] if not any(c in owner_name for c in [",", "/"]) else owner_name.split()[0]
+        last_name_var = tk.StringVar(value=last_name_cand.replace(",", "").strip())
+        last_name_entry = ttk.Entry(crit_frame, textvariable=last_name_var, width=12, font=("Helvetica", 11))
+        last_name_entry.pack(side=tk.LEFT, padx=(0, 5))
+        
         # Filter and selection control toolbar
         toolbar1 = ttk.Frame(dialog, padding=(12, 4))
         toolbar1.pack(fill=tk.X)
@@ -3901,7 +3925,10 @@ end tell'''
         date_to_entry = ttk.Entry(toolbar1, textvariable=date_to_var, width=11, font=("Helvetica", 11))
         date_to_entry.pack(side=tk.LEFT, padx=(0, 8))
         
-        btn_top_dl = ttk.Button(toolbar1, text="⬇️ DOWNLOAD SELECTED (0)")
+        btn_top_ai = ttk.Button(toolbar1, text="⚡ DOWNLOAD & AI TRIAGE HITS", style="Accent.TButton")
+        btn_top_ai.pack(side=tk.RIGHT, padx=2)
+
+        btn_top_dl = ttk.Button(toolbar1, text="⬇️ Download Selected")
         btn_top_dl.pack(side=tk.RIGHT, padx=2)
         
         count_lbl = ttk.Label(toolbar1, text="Selected: 0 of 0", font=("Helvetica", 12, "bold"), foreground=count_color)
@@ -3917,6 +3944,361 @@ end tell'''
         
         btn_desel_all = ttk.Button(toolbar2, text="Deselect All", width=11)
         btn_desel_all.pack(side=tk.LEFT, padx=2)
+
+        status_lbl = ttk.Label(bot_frame, text="", font=("Helvetica", 11, "bold"))
+        status_lbl.pack(side=tk.LEFT)
+        
+        progress_bar = ttk.Progressbar(bot_frame, orient=tk.HORIZONTAL, mode="determinate", length=220)
+        
+        def execute_download(run_ai=False):
+            if not selected_keys:
+                from tkinter import messagebox
+                messagebox.showwarning("No Selection", "Please select at least one document to download by clicking its row or using Select All.", parent=dialog)
+                return
+                
+            target_fld = folder_var.get().strip() or clean_folder_name
+            target_dir = os.path.join(pid_dir, "DOCS", target_fld)
+            hits_dir = os.path.join(target_dir, "Hits")
+            os.makedirs(target_dir, exist_ok=True)
+            if run_ai:
+                os.makedirs(hits_dir, exist_ok=True)
+            
+            selected_records = [records[i] for i in sorted(selected_keys)]
+            target_lot = lot_var.get().strip()
+            target_parcel = parcel_var.get().strip()
+            filter_last_name = last_name_var.get().strip()
+            
+            btn_dl.config(state=tk.DISABLED)
+            btn_ai.config(state=tk.DISABLED)
+            btn_top_dl.config(state=tk.DISABLED)
+            btn_top_ai.config(state=tk.DISABLED)
+            btn_close.config(state=tk.DISABLED)
+            progress_bar.pack(side=tk.LEFT, padx=10)
+            progress_bar['maximum'] = len(selected_records)
+            progress_bar['value'] = 0
+            
+            def download_worker():
+                import queue
+                import threading
+                import re
+                import shutil
+                from google import genai
+                from google.genai import types
+                
+                # Deduplicate Book/Page
+                items_to_download = []
+                seen_bp = set()
+                for r in selected_records:
+                    inst, dtype, volpg, date, grantor, grantee, legal = r
+                    m = re.search(r'(\d+)\s*[-/]\s*(\d+)', volpg)
+                    if m:
+                        v, p = m.group(1), m.group(2)
+                        if (v, p) not in seen_bp:
+                            seen_bp.add((v, p))
+                            items_to_download.append((v, p, dtype, r))
+                    elif volpg.isdigit():
+                        if (volpg, "1") not in seen_bp:
+                            seen_bp.add((volpg, "1"))
+                            items_to_download.append((volpg, "1", dtype, r))
+
+                if not items_to_download:
+                    dialog.after(0, lambda: messagebox.showwarning("No Valid Records", "None of the selected records had a valid Volume and Page to download.", parent=dialog))
+                    return
+
+                total_items = len(items_to_download)
+                download_queue = queue.Queue()
+                for item in items_to_download:
+                    download_queue.put(item)
+
+                ai_queue = queue.Queue()
+                all_ai_results = []
+                results_lock = threading.Lock()
+                download_complete_event = threading.Event()
+                completed_count = [0]
+
+                # Setup Gemini Client if AI screening enabled
+                client = None
+                if run_ai:
+                    try:
+                        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+                        with open(cfg_path) as f:
+                            api_key = json.load(f)["GEMINI_API_KEY"]
+                        client = genai.Client(api_key=api_key)
+                    except Exception as e:
+                        self.log(f"Gemini init warning: {e}")
+
+                def screen_doc(pdf_path, doc_type):
+                    if not client: return {"filename": os.path.basename(pdf_path), "filepath": pdf_path, "is_direct_hit": False}
+                    fn = os.path.basename(pdf_path)
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+                        
+                        prompt = f"""
+                        You are an expert real estate, oil & gas title attorney examining title records from Belmont County, Ohio.
+                        Examine this entire document carefully, including Page 1, Page 2, Page 3, and any attached EXHIBIT "A", EXHIBIT "B", Legal Schedules, or Parcel Tables.
+
+                        TARGET SEARCH OBJECTIVES:
+                        1. Check if this document conveys, leases, encumbers, ratifies, assigns, or references:
+                           - Target Lot(s): "{target_lot}" (including In-Lot, Out-Lot, or Lot numbers)
+                           - Target Parcel ID(s): "{target_parcel}"
+                        2. OIL & GAS LEASE SPECIAL INSTRUCTION:
+                           - Carefully read all tabular columns in Exhibit "A" / Exhibit "B" schedules. Look for matching Lots, Parcels, or Prior Deed references.
+                        3. MORTGAGES & LIENS:
+                           - Does this mortgage encumber the target Lot or Parcel?
+                        4. RELEASES / SATISFACTIONS / ASSIGNMENTS:
+                           - What original Mortgage or Lease Book/Volume and Page numbers does this document release, assign, modify, or satisfy?
+
+                        Return a strict JSON object:
+                        {{
+                          "is_direct_hit": true or false,
+                          "hit_reasons": ["List matching reasons"],
+                          "lots_found": ["List all lot numbers"],
+                          "parcels_found": ["List all parcel IDs"],
+                          "document_type": "{doc_type}",
+                          "recorded_date": "MM/DD/YYYY if visible",
+                          "grantor": "Grantor / Direct Party",
+                          "grantee": "Grantee / Reverse Party",
+                          "is_mortgage": true or false,
+                          "referenced_prior_vol_pgs": ["List any referenced prior deed, mortgage, or lease Vol/Pg numbers (e.g. '865/633', '618/161')"],
+                          "legal_summary": "1-2 sentence concise summary of the land or tract description",
+                          "exact_excerpt": "Exact text or table line from document"
+                        }}
+                        """
+                        res = client.models.generate_content(
+                            model='gemini-3.6-flash',
+                            contents=[types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), prompt],
+                            config={"response_mime_type": "application/json"}
+                        )
+                        data = json.loads(res.text.strip())
+                        data["filename"] = fn
+                        data["filepath"] = pdf_path
+                        return data
+                    except Exception as e:
+                        return {"filename": fn, "filepath": pdf_path, "is_direct_hit": False, "hit_reasons": [str(e)], "referenced_prior_vol_pgs": []}
+
+                def extract_volpg_regex(pdf_path):
+                    import fitz
+                    refs = set()
+                    try:
+                        doc = fitz.open(pdf_path)
+                        text = " ".join([page.get_text() for page in doc])
+                        m = re.findall(r'(?:VOL(?:UME)?\.?|BOOK)\s*#?\s*(\d{1,4})\s*(?:AT\s*)?(?:PAGE|PG\.?)\s*#?\s*(\d{1,4})', text, re.IGNORECASE)
+                        for v, p in m:
+                            refs.add(f"{int(v)}/{int(p)}")
+                            refs.add(f"{v}/{p}")
+                    except: pass
+                    return list(refs)
+
+                # AI Consumers (4 parallel threads)
+                def ai_consumer(worker_id):
+                    while not download_complete_event.is_set() or not ai_queue.empty():
+                        try:
+                            pdf_path, doc_type = ai_queue.get(timeout=1.5)
+                        except queue.Empty:
+                            continue
+                        
+                        data = screen_doc(pdf_path, doc_type)
+                        regex_refs = extract_volpg_regex(pdf_path)
+                        existing_refs = data.get("referenced_prior_vol_pgs", [])
+                        for rf in regex_refs:
+                            if rf not in existing_refs:
+                                existing_refs.append(rf)
+                        data["referenced_prior_vol_pgs"] = existing_refs
+
+                        is_hit = data.get("is_direct_hit", False)
+                        if is_hit:
+                            self.log(f"⭐ AI CONFIRMED HIT: {os.path.basename(pdf_path)}")
+                        with results_lock:
+                            all_ai_results.append(data)
+                        ai_queue.task_done()
+
+                ai_threads = []
+                if run_ai:
+                    for i in range(4):
+                        t = threading.Thread(target=ai_consumer, args=(i+1,), daemon=True)
+                        t.start()
+                        ai_threads.append(t)
+
+                # Scraper Producers (5 parallel workers with 400ms micro-stagger)
+                def scraper_producer(worker_id):
+                    time.sleep(worker_id * 0.4)
+                    while True:
+                        try:
+                            vol, pg, dtype, r = download_queue.get_nowait()
+                        except queue.Empty:
+                            break
+
+                        # 1. Try local drive archive first
+                        res = self.copy_local_deed(parcel_num, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
+                        clean_type = "".join(c for c in dtype if c.isalnum() or c in " _-").strip() or "DOC"
+                        expected_pdf = os.path.join(target_dir, f"{vol}-{pg} {clean_type}.pdf")
+                        
+                        if not res:
+                            self.log(f"Downloading from Kofile (Worker-{worker_id}): {dtype} Vol {vol} Pg {pg}...")
+                            res = self._fetch_kofile_single_doc_worker(vol, pg, dtype, target_dir, last_name=filter_last_name)
+
+                        if res and os.path.exists(expected_pdf):
+                            if run_ai:
+                                ai_queue.put((expected_pdf, dtype))
+
+                        completed_count[0] += 1
+                        cur = completed_count[0]
+                        dialog.after(0, lambda c=cur, t=dtype, v=vol, p=pg: [
+                            progress_bar.config(value=c),
+                            status_lbl.config(text=f"Processed ({c}/{total_items}): {t} {v}-{p}...")
+                        ])
+                        download_queue.task_done()
+
+                scraper_threads = []
+                for i in range(5):
+                    t = threading.Thread(target=scraper_producer, args=(i+1,))
+                    t.start()
+                    scraper_threads.append(t)
+
+                for st in scraper_threads:
+                    st.join()
+
+                download_complete_event.set()
+                for at in ai_threads:
+                    at.join()
+
+                # Relational Linking
+                if run_ai and all_ai_results:
+                    hit_volpgs = set()
+                    for r in all_ai_results:
+                        if r.get("is_direct_hit"):
+                            m = re.search(r'(\d+)-(\d+)', r["filename"])
+                            if m:
+                                v, p = m.group(1), m.group(2)
+                                hit_volpgs.add(f"{v}/{p}")
+                                hit_volpgs.add(f"{int(v)}/{int(p)}")
+
+                    for r in all_ai_results:
+                        if not r.get("is_direct_hit"):
+                            refs = r.get("referenced_prior_vol_pgs", [])
+                            for ref in refs:
+                                clean_ref = ref.replace(" ", "").replace("-", "/")
+                                parts = clean_ref.split("/")
+                                if len(parts) == 2:
+                                    v_p, p_p = parts
+                                    norm_ref = f"{int(v_p)}/{int(p_p)}" if v_p.isdigit() and p_p.isdigit() else clean_ref
+                                else:
+                                    norm_ref = clean_ref
+
+                                if clean_ref in hit_volpgs or norm_ref in hit_volpgs:
+                                    r["is_direct_hit"] = True
+                                    r["hit_reasons"].append(f"References Hit Instrument Vol/Pg {clean_ref}")
+                                    break
+
+                    confirmed_hits = [r for r in all_ai_results if r.get("is_direct_hit")]
+                    non_hits = [r for r in all_ai_results if not r.get("is_direct_hit")]
+
+                    for h in confirmed_hits:
+                        shutil.copy2(h["filepath"], os.path.join(hits_dir, h["filename"]))
+
+                    # Generate Markdown Hits Report
+                    report_path = os.path.join(target_dir, "Title_AI_Hits_Report.md")
+                    with open(report_path, "w") as f:
+                        f.write("# 🏆 Complete Title Examination & AI Triage Report\n\n")
+                        f.write(f"**Target Tract Criteria**: Lot {target_lot or 'N/A'} | Parcel `{target_parcel or 'N/A'}`\n")
+                        f.write(f"**Owner Searched**: {owner_name}\n")
+                        f.write(f"**Total Documents Examined**: {len(all_ai_results)}\n")
+                        f.write(f"**Total Confirmed Hits**: **{len(confirmed_hits)}**\n")
+                        f.write(f"**Hits Output Folder**: `DOCS/{target_fld}/Hits/`\n\n")
+                        f.write("---\n\n")
+                        f.write("## ⭐ Confirmed Hits (Affecting Target Tract)\n\n")
+
+                        for idx, h in enumerate(sorted(confirmed_hits, key=lambda x: x["filename"]), 1):
+                            fn = h["filename"]
+                            dtype = h.get("document_type", "N/A")
+                            rdate = h.get("recorded_date", "N/A")
+                            grantor = h.get("grantor", "N/A")
+                            grantee = h.get("grantee", "N/A")
+                            lots = ", ".join(h.get("lots_found", [])) or "None"
+                            parcels = ", ".join(h.get("parcels_found", [])) or "None"
+                            summary = h.get("legal_summary", "N/A")
+                            reasons = " | ".join(h.get("hit_reasons", []))
+                            excerpt = h.get("exact_excerpt", "").strip()
+
+                            f.write(f"### {idx}. 📄 `{fn}`\n")
+                            f.write(f"- **Document Type**: {dtype}\n")
+                            f.write(f"- **Recorded Date**: {rdate}\n")
+                            f.write(f"- **Parties**: {grantor} ➔ {grantee}\n")
+                            f.write(f"- **Hit Reasons**: `{reasons}`\n")
+                            f.write(f"- **Lots Found**: {lots}\n")
+                            f.write(f"- **Parcels Found**: {parcels}\n")
+                            f.write(f"- **Legal Summary**: {summary}\n")
+                            if excerpt:
+                                f.write(f"- **Document Excerpt**:\n> *\"{excerpt}\"*\n\n")
+                            f.write("\n")
+
+                def on_done():
+                    btn_dl.config(state=tk.NORMAL)
+                    btn_ai.config(state=tk.NORMAL)
+                    btn_top_dl.config(state=tk.NORMAL)
+                    btn_top_ai.config(state=tk.NORMAL)
+                    btn_close.config(state=tk.NORMAL)
+                    progress_bar.pack_forget()
+                    
+                    # Refresh Document Viewer folders
+                    self.update_viewer_folders()
+                    target_combo_val = f"DOCS/{target_fld}/Hits" if run_ai else f"DOCS/{target_fld}"
+                    if target_combo_val in self.viewer_folder_combo['values']:
+                        self.viewer_folder_combo.set(target_combo_val)
+                    elif f"DOCS/{target_fld}" in self.viewer_folder_combo['values']:
+                        self.viewer_folder_combo.set(f"DOCS/{target_fld}")
+                    self.refresh_viewer_list()
+                    
+                    if run_ai:
+                        num_hits = len([r for r in all_ai_results if r.get("is_direct_hit")])
+                        status_lbl.config(text=f"🏆 AI Triage Complete: {num_hits} Confirmed Hits in DOCS/{target_fld}/Hits!")
+                        from tkinter import messagebox
+                        msg = f"🎉 Title Examination & AI Triage Complete!\n\nExamined: {len(all_ai_results)} documents\nConfirmed Hits: {num_hits} documents\n\nHits saved in: DOCS/{target_fld}/Hits/\nFull Report: DOCS/{target_fld}/Title_AI_Hits_Report.md\n\nWould you like to open the Hits folder in Finder?"
+                        if messagebox.askyesno("AI Triage Complete", msg, parent=dialog):
+                            import subprocess, sys
+                            try:
+                                if sys.platform == "darwin":
+                                    subprocess.Popen(["open", hits_dir])
+                                elif sys.platform == "win32":
+                                    os.startfile(hits_dir)
+                                else:
+                                    subprocess.Popen(["xdg-open", hits_dir])
+                            except: pass
+                    else:
+                        status_lbl.config(text=f"✅ Finished downloading {completed_count[0]} documents to DOCS/{target_fld}!")
+                        from tkinter import messagebox
+                        msg = f"Successfully downloaded {completed_count[0]} documents into folder:\nDOCS/{target_fld}/\n\nWould you like to open this folder in Finder?"
+                        if messagebox.askyesno("Download Complete", msg, parent=dialog):
+                            import subprocess, sys
+                            try:
+                                if sys.platform == "darwin":
+                                    subprocess.Popen(["open", target_dir])
+                                elif sys.platform == "win32":
+                                    os.startfile(target_dir)
+                                else:
+                                    subprocess.Popen(["xdg-open", target_dir])
+                            except: pass
+                        
+                dialog.after(0, on_done)
+                
+            import threading
+            threading.Thread(target=download_worker, daemon=True).start()
+            
+        btn_top_ai.config(command=lambda: execute_download(run_ai=True))
+        btn_top_dl.config(command=lambda: execute_download(run_ai=False))
+        
+        btn_close = ttk.Button(bot_frame, text="Close", command=dialog.destroy)
+        btn_close.pack(side=tk.RIGHT, padx=5)
+        
+        btn_dl = ttk.Button(bot_frame, text="⬇️ Download Selected Only", command=lambda: execute_download(run_ai=False))
+        btn_dl.pack(side=tk.RIGHT, padx=5)
+
+        btn_ai = ttk.Button(bot_frame, text="⚡ DOWNLOAD & AI TRIAGE HITS", command=lambda: execute_download(run_ai=True), style="Accent.TButton")
+        btn_ai.pack(side=tk.RIGHT, padx=5)
+        
+        # Initial table population
+        refresh_table()
         
         btn_sel_deeds = ttk.Button(toolbar2, text="Only Deeds", width=11)
         btn_sel_deeds.pack(side=tk.LEFT, padx=2)
@@ -4306,7 +4688,7 @@ end tell'''
             import traceback
             traceback.print_exc()
 
-    def _fetch_kofile_single_doc_worker(self, vol_val, pg_val, doc_type, target_dir, stagger_sec=0.0):
+    def _fetch_kofile_single_doc_worker(self, vol_val, pg_val, doc_type, target_dir, stagger_sec=0.0, last_name=""):
         import time
         if stagger_sec > 0:
             time.sleep(stagger_sec)
@@ -4320,35 +4702,35 @@ end tell'''
                 page.goto("https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH", timeout=45000)
                 page.locator("input[value='Login as Guest']").click(no_wait_after=True)
                 page.wait_for_load_state('domcontentloaded')
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(800)
 
                 try:
                     accept_btn = page.frame_locator("iframe[name='bodyframe']").locator("input#accept")
-                    accept_btn.wait_for(state="visible", timeout=15000)
+                    accept_btn.wait_for(state="visible", timeout=10000)
                     accept_btn.click()
                     page.wait_for_load_state('domcontentloaded')
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(800)
                 except Exception:
                     pass
 
                 search_pub = page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first
-                search_pub.wait_for(state="visible", timeout=15000)
+                search_pub.wait_for(state="visible", timeout=10000)
                 search_pub.click()
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(800)
 
                 bp_tab = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Book / Page")
-                bp_tab.wait_for(state="visible", timeout=15000)
+                bp_tab.wait_for(state="visible", timeout=10000)
                 bp_tab.click()
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(400)
 
                 crit = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").frame_locator("iframe[name='criteriaframe']")
                 book_input = crit.get_by_role("textbox", name="Book")
-                book_input.wait_for(state="visible", timeout=15000)
+                book_input.wait_for(state="visible", timeout=10000)
                 book_input.fill(str(vol_val))
                 crit.get_by_role("textbox", name="Page").fill(str(pg_val))
 
                 page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").locator("img#imgSearch").click()
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1200)
 
                 reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
                 reslist.locator("tr").first.wait_for(state="visible", timeout=25000)
@@ -4357,10 +4739,13 @@ end tell'''
                 target_row = None
                 for i in range(rows.count()):
                     txt = rows.nth(i).inner_text().strip()
-                    if not txt or "Instrument" in txt or "Book/Page" in txt or "Type" in txt:
+                    if not txt or "Instrument" in txt or "Book/Page" in txt:
                         continue
-                    target_row = rows.nth(i)
-                    break
+                    if last_name and last_name.upper() in txt.upper():
+                        target_row = rows.nth(i)
+                        break
+                    elif not target_row:
+                        target_row = rows.nth(i)
 
                 if not target_row:
                     browser.close()
@@ -4376,10 +4761,10 @@ end tell'''
                             return docFrame && docFrame.contentWindow && typeof docFrame.contentWindow.getNumPages === 'function' && docFrame.contentWindow.getNumPages() > 0;
                         } catch (e) { return false; }
                     }
-                """, timeout=45000)
+                """, timeout=40000)
 
                 clean_type = "".join(c for c in doc_type if c.isalnum() or c in " _-").strip() or "DOC"
-                with page.expect_download(timeout=60000) as download_info:
+                with page.expect_download(timeout=50000) as download_info:
                     page.frame(name='bodyframe').evaluate("""
                         var instrId = document.getElementById("documentFrame").contentWindow.getInstrumentId();
                         var numPages = document.getElementById("documentFrame").contentWindow.getNumPages();
@@ -4670,41 +5055,71 @@ end tell'''
             except: pass
             
         dialog = tk.Toplevel(self.root)
-        dialog.title("General Name Search")
-        dialog.geometry("450x250")
+        dialog.title("Kofile Name Search & AI Triage")
+        dialog.geometry("480x360")
+        dialog.transient(self.root)
         
-        ttk.Label(dialog, text="Name:").pack(pady=(15, 5))
+        active_pid = self.parcel_entry.get().strip() if hasattr(self, 'parcel_entry') else ""
+        
+        ttk.Label(dialog, text="Party Name (e.g. McLaughlin Douglas):", font=("Helvetica", 11, "bold")).pack(pady=(12, 4), anchor=tk.W, padx=20)
         name_var = tk.StringVar()
         name_cb = ttk.Combobox(dialog, textvariable=name_var, values=history_names)
         name_cb.pack(fill=tk.X, padx=20)
-        
+        if history_names:
+            name_cb.set(history_names[0])
+            
         frame = ttk.Frame(dialog)
-        frame.pack(pady=15)
-        ttk.Label(frame, text="Start Date (MM/DD/YYYY):").grid(row=0, column=0, padx=5)
-        start_date_var = tk.StringVar(value="01/01/1900")
-        ttk.Entry(frame, textvariable=start_date_var).grid(row=0, column=1)
+        frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(frame, text="End Date (MM/DD/YYYY):").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Label(frame, text="Start Date:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        start_date_var = tk.StringVar(value="01/01/1980")
+        ttk.Entry(frame, textvariable=start_date_var, width=14).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
+        
+        ttk.Label(frame, text="End Date:").grid(row=0, column=2, sticky=tk.W, padx=(10, 0), pady=3)
         from datetime import datetime
         today_str = datetime.now().strftime("%m/%d/%Y")
         end_date_var = tk.StringVar(value=today_str)
-        ttk.Entry(frame, textvariable=end_date_var).grid(row=1, column=1, pady=5)
+        ttk.Entry(frame, textvariable=end_date_var, width=14).grid(row=0, column=3, sticky=tk.W, padx=5, pady=3)
+        
+        # Target Lot & Parcel Criteria for AI Screening
+        t_frame = ttk.LabelFrame(dialog, text="🎯 Target Tract Filter (Optional AI Screening)", padding=8)
+        t_frame.pack(fill=tk.X, padx=20, pady=6)
+        
+        ttk.Label(t_frame, text="Target Lot(s):").grid(row=0, column=0, sticky=tk.W, pady=3)
+        target_lot_var = tk.StringVar(value="")
+        ttk.Entry(t_frame, textvariable=target_lot_var, width=14).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
+        
+        ttk.Label(t_frame, text="Parcel ID:").grid(row=0, column=2, sticky=tk.W, padx=(10, 0), pady=3)
+        target_parcel_var = tk.StringVar(value=active_pid)
+        ttk.Entry(t_frame, textvariable=target_parcel_var, width=14).grid(row=0, column=3, sticky=tk.W, padx=5, pady=3)
         
         def on_search():
             name = name_var.get().strip()
             if not name: return
             start = start_date_var.get().strip()
             end = end_date_var.get().strip()
+            lot_crit = target_lot_var.get().strip()
+            parcel_crit = target_parcel_var.get().strip()
             dialog.destroy()
             
             from tkinter import messagebox
-            messagebox.showinfo("Search Started", f"Starting background search for {name}...\n\nPlease wait a few seconds. A results window will pop up automatically once Kofile finishes loading.", parent=self.root)
+            messagebox.showinfo("Search Started", f"Starting Kofile Name Search for '{name}'...\n\nA results window with 1-click Download & AI Triage will appear automatically once Kofile finishes loading.", parent=self.root)
             
-            search_params = [{"name": name, "acquisition_date": start, "disposal_date": end, "exact_dates": True}]
+            search_params = [{
+                "name": name, 
+                "acquisition_date": start, 
+                "disposal_date": end, 
+                "exact_dates": True,
+                "target_lot": lot_crit,
+                "target_parcel": parcel_crit
+            }]
             import threading
             threading.Thread(target=self._fetch_kofile_name_search, args=(search_params, pid_dir), daemon=True).start()
             
-        ttk.Button(dialog, text="Search & Download", command=on_search).pack(pady=10)
+        btn_box = ttk.Frame(dialog)
+        btn_box.pack(pady=12)
+        ttk.Button(btn_box, text="🔎 Search Public Records", command=on_search, style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_box, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
     def open_quick_log_mortgage(self):
         vol = self.org_vol_entry.get().strip()
