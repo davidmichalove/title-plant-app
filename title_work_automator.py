@@ -3831,8 +3831,8 @@ end tell'''
         clean_folder_name = "".join(c for c in owner_name if c.isalnum() or c in " _-").strip() or "Name_Search_Docs"
         parcel_num = os.path.basename(pid_dir).replace("PID ", "").strip()
         
-        # State tracking: selected row keys (by index in records list)
-        selected_keys = set()
+        # State tracking: all rows selected by default for 1-click batch download
+        selected_keys = set(range(len(records)))
         
         # Top banner frame
         top_frame = ttk.Frame(dialog, padding=(12, 10))
@@ -4128,40 +4128,53 @@ end tell'''
             progress_bar['value'] = 0
             
             def download_worker():
-                downloaded_count = 0
-                for idx, r in enumerate(selected_records):
+                import concurrent.futures
+                import re
+                
+                items_to_download = []
+                for r in selected_records:
                     inst, dtype, volpg, date, grantor, grantee, legal = r
-                    self.log(f"Downloading [{idx+1}/{len(selected_records)}] {dtype} {volpg} to DOCS/{target_fld}...")
-                    
-                    dialog.after(0, lambda i=idx, t=dtype, vp=volpg: status_lbl.config(text=f"Fetching ({i+1}/{len(selected_records)}): {t} {vp}..."))
-                    
-                    vol = ""
-                    pg = ""
-                    import re
                     m = re.search(r'(\d+)\s*[-/]\s*(\d+)', volpg)
                     if m:
-                        vol = m.group(1)
-                        pg = m.group(2)
+                        items_to_download.append((m.group(1), m.group(2), dtype, r))
                     elif volpg.isdigit():
-                        vol = volpg
-                        pg = "1"
-                        
-                    if vol and pg:
-                        # 1. Try local drive archive first
-                        res = self.copy_local_deed(parcel_num, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
-                        if not res:
-                            # 2. Scrape from Kofile web portal
-                            self._fetch_kofile_deed_background(vol, pg, parcel_num, doc_type=dtype, custom_docs_dir=target_dir, auto_open=False)
-                        downloaded_count += 1
-                        
-                    dialog.after(0, lambda i=idx+1: progress_bar.config(value=i))
+                        items_to_download.append((volpg, "1", dtype, r))
+
+                if not items_to_download:
+                    dialog.after(0, lambda: messagebox.showwarning("No Valid Records", "None of the selected records had a valid Volume and Page to download.", parent=dialog))
+                    return
+
+                total_items = len(items_to_download)
+                completed_count = [0]
+
+                def process_item(item_info, worker_idx):
+                    vol, pg, dtype, r = item_info
+                    # 1. Try local drive archive first (instant)
+                    res = self.copy_local_deed(parcel_num, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
+                    if not res:
+                        # 2. Parallel Playwright download from Kofile
+                        self.log(f"Downloading from Kofile (Parallel Worker): {dtype} Vol {vol} Pg {pg}...")
+                        res = self._fetch_kofile_single_doc_worker(vol, pg, dtype, target_dir, stagger_sec=worker_idx * 0.4)
                     
+                    completed_count[0] += 1
+                    cur = completed_count[0]
+                    dialog.after(0, lambda c=cur, t=dtype, v=vol, p=pg: [
+                        progress_bar.config(value=c),
+                        status_lbl.config(text=f"Downloaded ({c}/{total_items}): {t} {v}-{p}...")
+                    ])
+                    return res
+
+                # Run parallel download with 4 concurrent workers
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = [executor.submit(process_item, item, idx % 4) for idx, item in enumerate(items_to_download)]
+                    concurrent.futures.wait(futures)
+
                 def on_done():
                     btn_dl.config(state=tk.NORMAL)
                     btn_top_dl.config(state=tk.NORMAL)
                     btn_close.config(state=tk.NORMAL)
                     progress_bar.pack_forget()
-                    status_lbl.config(text=f"✅ Finished downloading {downloaded_count} documents to DOCS/{target_fld}!")
+                    status_lbl.config(text=f"✅ Finished downloading {completed_count[0]} documents to DOCS/{target_fld}!")
                     
                     # Refresh Document Viewer folders
                     self.update_viewer_folders()
@@ -4171,7 +4184,7 @@ end tell'''
                     self.refresh_viewer_list()
                     
                     from tkinter import messagebox
-                    msg = f"Successfully downloaded {downloaded_count} documents into folder:\nDOCS/{target_fld}/\n\nWould you like to open this folder in Finder?"
+                    msg = f"Successfully downloaded {completed_count[0]} documents into folder:\nDOCS/{target_fld}/\n\nWould you like to open this folder in Finder?"
                     if messagebox.askyesno("Download Complete", msg, parent=dialog):
                         import subprocess, sys
                         try:
@@ -4287,6 +4300,96 @@ end tell'''
             self.log(f"CourtView Name Search failed: {e}")
             import traceback
             traceback.print_exc()
+
+    def _fetch_kofile_single_doc_worker(self, vol_val, pg_val, doc_type, target_dir, stagger_sec=0.0):
+        import time
+        if stagger_sec > 0:
+            time.sleep(stagger_sec)
+            
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(accept_downloads=True)
+            page = context.new_page()
+            try:
+                page.goto("https://countyfusion13.kofiletech.us/countyweb/loginDisplay.action?countyname=BelmontOH", timeout=45000)
+                page.locator("input[value='Login as Guest']").click(no_wait_after=True)
+                page.wait_for_load_state('domcontentloaded')
+                page.wait_for_timeout(1000)
+
+                try:
+                    accept_btn = page.frame_locator("iframe[name='bodyframe']").locator("input#accept")
+                    accept_btn.wait_for(state="visible", timeout=15000)
+                    accept_btn.click()
+                    page.wait_for_load_state('domcontentloaded')
+                    page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+
+                search_pub = page.frame_locator("iframe[name='bodyframe']").locator("text='Search Public Records'").first
+                search_pub.wait_for(state="visible", timeout=15000)
+                search_pub.click()
+                page.wait_for_timeout(1000)
+
+                bp_tab = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").get_by_role("tab", name="Book / Page")
+                bp_tab.wait_for(state="visible", timeout=15000)
+                bp_tab.click()
+                page.wait_for_timeout(500)
+
+                crit = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").frame_locator("iframe[name='criteriaframe']")
+                book_input = crit.get_by_role("textbox", name="Book")
+                book_input.wait_for(state="visible", timeout=15000)
+                book_input.fill(str(vol_val))
+                crit.get_by_role("textbox", name="Page").fill(str(pg_val))
+
+                page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='dynSearchFrame']").locator("img#imgSearch").click()
+                page.wait_for_timeout(1500)
+
+                reslist = page.frame_locator("iframe[name='bodyframe']").frame_locator("iframe[name='resultFrame']").frame_locator("iframe[name='resultListFrame']")
+                reslist.locator("tr").first.wait_for(state="visible", timeout=25000)
+
+                rows = reslist.locator("tr")
+                target_row = None
+                for i in range(rows.count()):
+                    txt = rows.nth(i).inner_text().strip()
+                    if not txt or "Instrument" in txt or "Book/Page" in txt or "Type" in txt:
+                        continue
+                    target_row = rows.nth(i)
+                    break
+
+                if not target_row:
+                    browser.close()
+                    return False
+
+                target_row.dblclick()
+                page.on("dialog", lambda d: d.accept())
+
+                page.frame(name='bodyframe').wait_for_function("""
+                    () => {
+                        try {
+                            var docFrame = document.getElementById("documentFrame");
+                            return docFrame && docFrame.contentWindow && typeof docFrame.contentWindow.getNumPages === 'function' && docFrame.contentWindow.getNumPages() > 0;
+                        } catch (e) { return false; }
+                    }
+                """, timeout=45000)
+
+                clean_type = "".join(c for c in doc_type if c.isalnum() or c in " _-").strip() or "DOC"
+                with page.expect_download(timeout=60000) as download_info:
+                    page.frame(name='bodyframe').evaluate("""
+                        var instrId = document.getElementById("documentFrame").contentWindow.getInstrumentId();
+                        var numPages = document.getElementById("documentFrame").contentWindow.getNumPages();
+                        continueDownloadDocImage(instrId, true, numPages, "printall", false);
+                    """)
+
+                download = download_info.value
+                out_file = os.path.join(target_dir, f"{clean_type} {vol_val}-{pg_val}.pdf")
+                download.save_as(out_file)
+                browser.close()
+                return True
+            except Exception as e:
+                try: browser.close()
+                except: pass
+                return False
 
     def _fetch_kofile_deed_background(self, vol_val, pg_val, parcel_num, doc_type="ALL", custom_docs_dir=None, auto_open=False):
         try:
