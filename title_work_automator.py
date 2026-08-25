@@ -4382,7 +4382,7 @@ end tell'''
                     """)
 
                 download = download_info.value
-                out_file = os.path.join(target_dir, f"{clean_type} {vol_val}-{pg_val}.pdf")
+                out_file = os.path.join(target_dir, f"{vol_val}-{pg_val} {clean_type}.pdf")
                 download.save_as(out_file)
                 browser.close()
                 return True
@@ -4602,7 +4602,7 @@ end tell'''
                 original_name = download.suggested_filename
                 ext = os.path.splitext(original_name)[1] or '.pdf'
                 
-                target_filename = f"{book_type} {vol_val}-{pg_val}{ext}"
+                target_filename = f"{vol_val}-{pg_val} {book_type}{ext}"
                 target_path = os.path.join(docket_dir, target_filename)
                 download.save_as(target_path)
                 
