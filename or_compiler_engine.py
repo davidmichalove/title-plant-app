@@ -431,6 +431,7 @@ class ORCompilerEngine:
             "pid_dir": pid_dir,
             "rs_path": rs_path,
             "parcel_num": parcel_num,
+            "all_rows": rows,
             "from_date": earliest_date,
             "to_date": today_date,
             "qtr_val": qtr_val,
