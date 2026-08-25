@@ -182,6 +182,8 @@ class AutomatorApp:
         self.rs_editor_btn.pack(side=tk.LEFT, padx=3)
         self.gemini_rs_btn = ttk.Button(btn_container_bottom, text="Gemini RS", command=self.open_gemini_rs_editor)
         self.gemini_rs_btn.pack(side=tk.LEFT, padx=3)
+        self.reformat_rs_btn = ttk.Button(btn_container_bottom, text="Reformat RS", command=self.reformat_active_parcel_runsheet)
+        self.reformat_rs_btn.pack(side=tk.LEFT, padx=3)
         self.gis_browser_btn = ttk.Button(btn_container_bottom, text="B-GIS", command=self.open_belmont_gis)
         self.gis_browser_btn.pack(side=tk.LEFT, padx=3)
         self.name_search_btn = ttk.Button(btn_container_bottom, text="Nom Search", command=self.open_name_search)
@@ -5418,6 +5420,167 @@ end tell'''
             messagebox.showerror("Error", f"Could not open Ownership Report Excel:\n{e}")
 
         return "break"
+
+    def reformat_active_parcel_runsheet(self):
+        pid = self.parcel_entry.get().strip()
+        if not pid:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Please enter a Parcel Number (PID) first.", parent=self.root)
+            return
+
+        pid_dir = self.get_parcel_dir(pid)
+        if not os.path.exists(pid_dir):
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Parcel folder does not exist:\n{pid_dir}", parent=self.root)
+            return
+
+        import glob
+        matches = glob.glob(os.path.join(pid_dir, "*RS*.xlsx")) + glob.glob(os.path.join(pid_dir, "*Runsheet*.xlsx"))
+        matches = [
+            m for m in matches 
+            if not os.path.basename(m).startswith("~$") 
+            and not os.path.basename(m).startswith("._") 
+            and "_Backup" not in m
+        ]
+
+        if not matches:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Could not find any Runsheet (*RS*.xlsx) in:\n{pid_dir}", parent=self.root)
+            return
+
+        target_file = matches[0]
+        for m in matches:
+            b_name = os.path.basename(m).upper()
+            if "TEMPLATE" not in b_name and "BLANK" not in b_name:
+                target_file = m
+                break
+
+        # Ask user for confirmation
+        from tkinter import messagebox
+        confirm = messagebox.askyesno(
+            "Reformat Runsheet Excel",
+            f"Do you want to reformat the Runsheet Excel workbook for PID {pid}?\n\n"
+            f"File: {os.path.basename(target_file)}\n\n"
+            "This will:\n"
+            "• Create a timestamped backup in BACKUPS/\n"
+            "• Clean messy date formats and remove quote prefixes\n"
+            "• Parse ARTI, Dower, Amounts, Maturities, and Prior References\n"
+            "• Apply bold formatted section headers and standardized styling\n\n"
+            "Proceed?",
+            parent=self.root
+        )
+        if not confirm:
+            return
+
+        # Perform the complete reformatting pipeline
+        try:
+            import datetime, shutil, json, re, openpyxl
+            from openpyxl.cell.rich_text import TextBlock, CellRichText
+
+            # 1. Backup
+            backups_dir = os.path.join(pid_dir, "BACKUPS")
+            os.makedirs(backups_dir, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_name = os.path.splitext(os.path.basename(target_file))[0]
+            backup_file = os.path.join(backups_dir, f"{base_name}_backup_{ts}.xlsx")
+            shutil.copy2(target_file, backup_file)
+
+            wb = openpyxl.load_workbook(target_file, rich_text=True)
+            ws = wb.active
+
+            headers = [str(cell.value or "").strip() for cell in ws[2]]
+            date_cols = [i for i, h in enumerate(headers) if "date" in h.lower()]
+            comments_col = None
+            for i, h in enumerate(headers):
+                if "comment" in h.lower() or "note" in h.lower():
+                    comments_col = i + 1
+                    break
+
+            # 2. Clean dates
+            for row_idx in range(3, ws.max_row + 1):
+                row = ws[row_idx]
+                for col_idx in date_cols:
+                    if col_idx < len(row):
+                        cell = row[col_idx]
+                        val = str(cell.value or "").strip()
+                        if getattr(cell, 'quotePrefix', False):
+                            cell.quotePrefix = False
+                        if len(val) > 20 and "GMT" in val:
+                            parts = val.split()
+                            if len(parts) >= 4 and parts[0] in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
+                                try:
+                                    dt = datetime.datetime.strptime(" ".join(parts[:4]), "%a %b %d %Y")
+                                    cell.value = dt.strftime("%m/%d/%Y")
+                                    cell.number_format = '@'
+                                    cell.data_type = 's'
+                                except Exception: pass
+                        elif val.startswith("'"):
+                            cell.value = val[1:]
+                            cell.number_format = '@'
+                            cell.data_type = 's'
+
+            # 3. Format Comments
+            changed_count = 0
+            if comments_col:
+                import runsheet_editor
+                editor_dummy = runsheet_editor.RunsheetEditorWindow.__new__(runsheet_editor.RunsheetEditorWindow)
+                editor_dummy.headers = headers
+                editor_dummy.pid_dir = pid_dir
+                editor_dummy.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                
+                for row_idx in range(3, ws.max_row + 1):
+                    cell = ws.cell(row=row_idx, column=comments_col)
+                    val = cell.value
+                    if not val:
+                        continue
+                    if type(val).__name__ == 'CellRichText':
+                        txt = "".join(str(p) for p in val)
+                    else:
+                        txt = str(val)
+
+                    if "--- Original ---" in txt:
+                        raw_text = txt.split("--- Original ---")[1].strip()
+                    else:
+                        raw_text = txt.replace("\u200B", "").strip()
+
+                    inst_type = str(ws.cell(row=row_idx, column=1).value or "").lower()
+                    formatted_txt = runsheet_editor.RunsheetEditorWindow.apply_initial_formatting_pipeline(editor_dummy, raw_text, inst_type)
+                    parts = runsheet_editor.RunsheetEditorWindow._parse_bold_tokens(editor_dummy, formatted_txt)
+
+                    if not any(isinstance(p, TextBlock) for p in parts):
+                        cell.value = "".join(parts).strip()
+                    else:
+                        cell.value = CellRichText(*parts)
+                    changed_count += 1
+
+            wb.save(target_file)
+
+            # Update initial_formatting_done.json
+            fmt_state = os.path.join(pid_dir, "initial_formatting_done.json")
+            with open(fmt_state, "w") as f:
+                json.dump({"initial_formatting_completed": True}, f)
+
+            self.log(f"⚡ Reformat complete: {changed_count} rows formatted in {os.path.basename(target_file)}")
+
+            # Notify user
+            open_confirm = messagebox.askyesno(
+                "Reformat Complete",
+                f"🎉 Runsheet reformatted successfully!\n\n"
+                f"• Reformatted {changed_count} rows with clean dates and bold formatting.\n"
+                f"• Backup saved to: BACKUPS/{os.path.basename(backup_file)}\n\n"
+                "Would you like to open the Excel spreadsheet now?",
+                parent=self.root
+            )
+            if open_confirm:
+                import subprocess
+                if os.name == 'nt':
+                    os.startfile(target_file)
+                else:
+                    subprocess.call(('open', target_file))
+
+        except Exception as e:
+            self.log(f"Reformat failed: {e}")
+            messagebox.showerror("Error", f"Failed to reformat Runsheet Excel:\n{e}", parent=self.root)
 
     def open_gemini_rs_editor(self):
         pid = self.parcel_entry.get().strip()

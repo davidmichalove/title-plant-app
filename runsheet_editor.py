@@ -193,7 +193,7 @@ class RunsheetEditorWindow(tk.Toplevel):
         self.action_bar_row1 = ttk.Frame(header_area)
         self.action_bar_row1.pack(fill=tk.X, pady=(4, 2))
         
-        self.reformat_btn = ttk.Button(self.action_bar_row1, text="Reformat Comments", command=self.confirm_and_reformat_all)
+        self.reformat_btn = ttk.Button(self.action_bar_row1, text="⚡ Reformat Excel", command=self.confirm_and_reformat_all)
         self.reformat_btn.pack(side=tk.LEFT)
         
         self.sync_or_btn = ttk.Button(self.action_bar_row1, text="📊 Sync OR", command=self.open_or_sync_dialog)
@@ -2665,10 +2665,11 @@ class RunsheetEditorWindow(tk.Toplevel):
 
     def confirm_and_reformat_all(self):
         confirm = messagebox.askyesno(
-            "Reformat Comments",
-            "Do you really want to re-run the initial formatting rules on all comments?\n\n"
-            "• A timestamped backup copy of your current spreadsheet will be saved first.\n"
-            "• This will re-parse ARTI, Amount, Maturity, Dower, and re-generate the Original Notes blocks.\n\n"
+            "Reformat Runsheet Excel",
+            "Do you want to re-run the complete initial formatting on this spreadsheet?\n\n"
+            "• A timestamped backup copy will be saved in BACKUPS/ first.\n"
+            "• Cleans messy dates, removes quote prefixes, and standardizes date formatting.\n"
+            "• Re-parses ARTI, Amount, Maturity, Dower, Prior References, and applies bold styling.\n\n"
             "Do you want to proceed?",
             parent=self
         )
@@ -2691,7 +2692,10 @@ class RunsheetEditorWindow(tk.Toplevel):
             messagebox.showerror("Backup Error", f"Failed to create backup prior to reformatting:\n{e}", parent=self)
             return
 
-        # 2. Force reformat all comments
+        # 2. Clean dates and quote prefixes
+        self.cleanup_messy_dates()
+
+        # 3. Force reformat all comments
         comments_col = None
         for i, h in enumerate(self.headers):
             if "comment" in str(h).lower() or "note" in str(h).lower():
