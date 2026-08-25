@@ -209,8 +209,9 @@ def parse_lease_details(r):
     btype = r.get("btype", "")
     vol = r.get("vol", "")
     pg = r.get("pg", "")
-    bk_pg = f"{btype} {vol}/{pg}"
-    is_memo = "memo" in r.get("itype", "").lower() or "memo" in comments.lower()
+    bk_pg = f"{btype} {vol}/{pg}".strip() if vol and pg else (btype or r.get("itype", "Lease"))
+    is_notice = "notice" in r.get("itype", "").lower() or "notice" in comments.lower()
+    is_memo = "memo" in r.get("itype", "").lower() or "memo" in comments.lower() or is_notice
     
     return {
         "row": r,
@@ -219,6 +220,7 @@ def parse_lease_details(r):
         "bk_pg": bk_pg,
         "inst_num": r.get("inst_num", ""),
         "is_memo": is_memo,
+        "is_notice": is_notice,
         "eff_date": eff_dt_str,
         "term": term_desc,
         "exp_date": exp_date_str,
@@ -385,9 +387,14 @@ class ORCompilerEngine:
         # B) Oil & Gas Leases
         lease_rows = []
         parsed_leases = []
+        lease_keywords = [
+            "lease", "memorandum of lease", "memo of lease", "oil and gas lease", "o&g lease", 
+            "ratification of oil", "addendum to and ratification", "notice of lease", 
+            "notice lease", "notice of oil and gas", "notice of o&g"
+        ]
         for r in rows:
             it_l = r["itype"].lower()
-            if any(k in it_l for k in ["lease", "memorandum of lease", "oil and gas lease", "ratification of oil", "addendum to and ratification"]) and not any(k in it_l for k in ["release", "surrender", "assignment"]):
+            if any(k in it_l for k in lease_keywords) and not any(k in it_l for k in ["release", "surrender", "assignment"]):
                 summary = format_encumbrance_short(r)
                 lease_rows.append({"row": r, "summary": summary, "included": True, "status": "Active"})
                 parsed_leases.append(parse_lease_details(r))
@@ -563,11 +570,13 @@ class ORCompilerEngine:
                     ws.cell(r, c).value = None
             ws.cell(23, 3).value = 1.0
 
-        # 7. Leasehold Handling (Populate vs Open of Record)
+        # 7. Leasehold Handling (Populate vs Open of Record vs Do Not Modify)
         l_mode = data.get("leasehold_mode", "open_of_record")
         p_lease = data.get("primary_lease")
         
-        if l_mode == "open_of_record" or not p_lease:
+        if l_mode in ("do_not_modify", "none", "skip"):
+            pass # Leave Leasehold Column J and Leasehold Schedule A tab completely untouched
+        elif l_mode == "open_of_record" or not p_lease:
             ws.cell(23, 10, "OPEN OF RECORD")
             for r in range(24, 32):
                 ws.cell(r, 10).value = None
@@ -575,11 +584,11 @@ class ORCompilerEngine:
                 wb.remove(wb["Leasehold Schedule A"])
         else:
             # Auto-populate Leasehold Column J in TR #1 Ownership
-            memo_tag = " (Memo)" if p_lease.get("is_memo") else ""
+            tag = " (Notice)" if p_lease.get("is_notice") else (" (Memo)" if p_lease.get("is_memo") else "")
             ws.cell(23, 10, "LEASEHOLD SCHEDULE A")
             ws.cell(24, 10, f"Exp.: {p_lease['exp_date']}, {p_lease['term']}, HBP")
             ws.cell(25, 10, f"Royalty: {p_lease['royalty']}")
-            ws.cell(26, 10, f"Book/Page: {p_lease['bk_pg']}{memo_tag}")
+            ws.cell(26, 10, f"Book/Page: {p_lease['bk_pg']}{tag}")
             ws.cell(27, 10, f"Instrument Number: {p_lease['inst_num']}")
             ws.cell(28, 10, "Covers Tract #1 Only")
             ws.cell(29, 10, f"Horizontal Pugh Clause: {p_lease['pugh']}")
@@ -589,7 +598,8 @@ class ORCompilerEngine:
             # Auto-populate Leasehold Schedule A tab if present
             if "Leasehold Schedule A" in wb.sheetnames:
                 ws_ls = wb["Leasehold Schedule A"]
-                ws_ls.cell(11, 1, f"{p_lease['bk_pg']}\n{p_lease['inst_num']}\n(Memo)" if p_lease.get("is_memo") else f"{p_lease['bk_pg']}\n{p_lease['inst_num']}")
+                ls_tag = f"\n{tag.strip()}" if tag else ""
+                ws_ls.cell(11, 1, f"{p_lease['bk_pg']}\n{p_lease['inst_num']}{ls_tag}".strip())
                 ws_ls.cell(11, 2, p_lease["lessor"])
                 ws_ls.cell(11, 3, p_lease["lessee"])
                 ws_ls.cell(11, 4, "='TR #1 Ownership'!E23")

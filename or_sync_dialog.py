@@ -169,6 +169,9 @@ class ORSyncDialog(tk.Toplevel):
         rb_open = ttk.Radiobutton(l_frame, text="📜 OPEN OF RECORD (No active lease / Delete 'Leasehold Schedule A' tab)", value="open_of_record", variable=self.leasehold_mode_var)
         rb_open.pack(anchor="w", pady=2)
 
+        rb_none = ttk.Radiobutton(l_frame, text="🔒 DO NOT MODIFY / LEAVE UNTOUCHED (Leave existing Leasehold Schedule A & Column J as-is)", value="do_not_modify", variable=self.leasehold_mode_var)
+        rb_none.pack(anchor="w", pady=2)
+
         # Quick Cleanup Options Section
         opt_frame = ttk.LabelFrame(self.tab_owners, text="⚡ Quick Cleanups", padding=10)
         opt_frame.pack(fill=tk.X, pady=6)
