@@ -815,10 +815,11 @@ class AutomatorApp:
                     folders.append(item)
                     if item.upper() == "DOCS":
                         docs_exists = True
-                        for sub_item in sorted(os.listdir(item_path)):
-                            sub_p = os.path.join(item_path, sub_item)
-                            if os.path.isdir(sub_p) and not sub_item.startswith("."):
-                                folders.append(f"DOCS/{sub_item}")
+                        for root_dir, dirs, files in os.walk(item_path):
+                            rel = os.path.relpath(root_dir, self.viewer_pid_dir)
+                            if rel != "DOCS" and not any(part.startswith(".") for part in rel.split(os.sep)):
+                                if rel not in folders:
+                                    folders.append(rel)
                     if item.upper() == "WELL INFO":
                         for sub_item in os.listdir(item_path):
                             if os.path.isdir(os.path.join(item_path, sub_item)):
@@ -3802,7 +3803,9 @@ end tell'''
                         
                     if all_parsed_rows and hasattr(self, 'root'):
                         # Launch interactive results and downloader dialog on UI thread
-                        self.root.after(0, lambda n=name, r=list(all_parsed_rows), pd=pid_dir: self.show_name_search_results_dialog(n, r, pd))
+                        t_lot = owner.get("target_lot", "")
+                        t_parcel = owner.get("target_parcel", "")
+                        self.root.after(0, lambda n=name, r=list(all_parsed_rows), pd=pid_dir, tl=t_lot, tp=t_parcel: self.show_name_search_results_dialog(n, r, pd, target_lot=tl, target_parcel=tp))
                         
                     context.close()
                     
@@ -3821,7 +3824,7 @@ end tell'''
         except Exception as e:
             self.log(f"Kofile name search failed: {e}")
 
-    def show_name_search_results_dialog(self, owner_name, records, pid_dir):
+    def show_name_search_results_dialog(self, owner_name, records, pid_dir, target_lot="", target_parcel=""):
         if not records:
             from tkinter import messagebox
             messagebox.showinfo("Name Search Results", f"No documents found on Kofile for '{owner_name}'.", parent=self.root)
@@ -3834,7 +3837,7 @@ end tell'''
         dialog.transient(self.root)
         
         clean_folder_name = "".join(c for c in owner_name if c.isalnum() or c in " _-").strip() or "Name_Search_Docs"
-        parcel_num = os.path.basename(pid_dir).replace("PID ", "").strip()
+        parcel_num = target_parcel or os.path.basename(pid_dir).replace("PID ", "").strip()
         
         # State tracking: all rows selected by default for 1-click batch download
         selected_keys = set(range(len(records)))
@@ -3887,7 +3890,7 @@ end tell'''
         crit_frame.pack(fill=tk.X, pady=(4, 2))
         
         ttk.Label(crit_frame, text="Target Lot(s):").pack(side=tk.LEFT, padx=(4, 2))
-        lot_var = tk.StringVar(value="")
+        lot_var = tk.StringVar(value=target_lot)
         lot_entry = ttk.Entry(crit_frame, textvariable=lot_var, width=12, font=("Helvetica", 11))
         lot_entry.pack(side=tk.LEFT, padx=(0, 10))
         
