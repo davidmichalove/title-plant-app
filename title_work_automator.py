@@ -42,13 +42,15 @@ TEMPLATE_2 = os.path.join(BASE_DIR, "PID RS (DATE)_TEMPLATE.xlsx")
 class AutomatorApp:
     def set_buttons_state(self, state):
         def _set():
-            if hasattr(self, 'run_btn'): self.run_btn.config(state=state)
-            if hasattr(self, 'manual_btn'): self.manual_btn.config(state=state)
-            if hasattr(self, 'scrape_btn'): self.scrape_btn.config(state=state)
-            if hasattr(self, 'og_btn'): self.og_btn.config(state=state)
-            if hasattr(self, 'court_btn'): self.court_btn.config(state=state)
-            if hasattr(self, 'gis_btn'): self.gis_btn.config(state=state)
-        self.root.after(0, _set)
+            for btn_attr in ['run_btn', 'manual_btn', 'scrape_btn', 'og_btn', 'court_btn', 'gis_btn', 'next_page_btn', 'court_view_btn', 'gis_view_btn']:
+                btn = getattr(self, btn_attr, None)
+                if btn:
+                    try:
+                        btn.config(state=state)
+                    except Exception:
+                        pass
+        if hasattr(self, 'root'):
+            self.root.after(0, _set)
 
     def __init__(self, root):
         self.root = root
@@ -1961,9 +1963,7 @@ class AutomatorApp:
             if not messagebox.askyesno("Already Created", "WARNING this has already been created.\n\nDo you want to continue automation anyway? (Files may be overwritten)"):
                 return
         
-        self.run_btn.config(state=tk.DISABLED)
-        self.manual_btn.config(state=tk.DISABLED)
-        self.og_btn.config(state=tk.DISABLED)
+        self.set_buttons_state(tk.DISABLED)
         threading.Thread(target=self.run_process, args=(parcel_num,), daemon=True).start()
 
     def start_manual_download(self):
@@ -1981,10 +1981,7 @@ class AutomatorApp:
             messagebox.showwarning("Input Error", "Please enter a Parcel Number to set the save folder.")
             return
 
-        self.run_btn.config(state=tk.DISABLED)
-        self.manual_btn.config(state=tk.DISABLED)
-        if hasattr(self, 'scrape_btn'): self.scrape_btn.config(state=tk.DISABLED)
-        self.og_btn.config(state=tk.DISABLED)
+        self.set_buttons_state(tk.DISABLED)
         import threading
         threading.Thread(target=self.run_manual_process, args=(parcel_num, vol, pg, doc_type_val), daemon=True).start()
 
@@ -2003,10 +2000,7 @@ class AutomatorApp:
             messagebox.showwarning("Input Error", "Please enter a Parcel Number to set the save folder.")
             return
 
-        self.run_btn.config(state=tk.DISABLED)
-        self.manual_btn.config(state=tk.DISABLED)
-        if hasattr(self, 'scrape_btn'): self.scrape_btn.config(state=tk.DISABLED)
-        self.og_btn.config(state=tk.DISABLED)
+        self.set_buttons_state(tk.DISABLED)
         import threading
         threading.Thread(target=self.run_manual_scrape, args=(parcel_num, vol, pg, doc_type_val), daemon=True).start()
 
@@ -2025,10 +2019,7 @@ class AutomatorApp:
         except Exception as e:
             self.log(f"Manual web scrape failed: {e}")
         finally:
-            self.run_btn.config(state=tk.NORMAL)
-            self.manual_btn.config(state=tk.NORMAL)
-            if hasattr(self, 'scrape_btn'): self.scrape_btn.config(state=tk.NORMAL)
-            self.og_btn.config(state=tk.NORMAL)
+            self.set_buttons_state(tk.NORMAL)
 
     def start_og_check(self):
         parcel_num = self.parcel_entry.get().strip()
@@ -2036,9 +2027,7 @@ class AutomatorApp:
             messagebox.showwarning("Input Error", "Please enter a Parcel Number")
             return
             
-        self.run_btn.config(state=tk.DISABLED)
-        self.manual_btn.config(state=tk.DISABLED)
-        self.og_btn.config(state=tk.DISABLED)
+        self.set_buttons_state(tk.DISABLED)
         threading.Thread(target=self.run_og_process, args=(parcel_num,), daemon=True).start()
 
     def run_og_process(self, parcel_num):
@@ -2048,10 +2037,7 @@ class AutomatorApp:
         except Exception as e:
             self.log(f"Error running O&G Checker: {e}")
         finally:
-            self.run_btn.config(state=tk.NORMAL)
-            self.manual_btn.config(state=tk.NORMAL)
-            self.og_btn.config(state=tk.NORMAL)
-            self.court_btn.config(state=tk.NORMAL)
+            self.set_buttons_state(tk.NORMAL)
 
     def start_court_check(self):
         csv_path = filedialog.askopenfilename(
@@ -2061,10 +2047,7 @@ class AutomatorApp:
         if not csv_path:
             return
             
-        self.run_btn.config(state=tk.DISABLED)
-        self.manual_btn.config(state=tk.DISABLED)
-        self.og_btn.config(state=tk.DISABLED)
-        self.court_btn.config(state=tk.DISABLED)
+        self.set_buttons_state(tk.DISABLED)
         
         self.log(f"Starting Court Records Checker with {csv_path}")
         threading.Thread(target=self.run_court_check, args=(csv_path,), daemon=True).start()
@@ -2075,12 +2058,8 @@ class AutomatorApp:
             court_checker.process_court_records(csv_path, update_status_callback=self.log)
         except Exception as e:
             self.log(f"Error running Court Records Checker: {e}")
-            
-        self.log("Court Records Checker finished.")
-        self.run_btn.config(state=tk.NORMAL)
-        self.manual_btn.config(state=tk.NORMAL)
-        self.og_btn.config(state=tk.NORMAL)
-        self.court_btn.config(state=tk.NORMAL)
+        finally:
+            self.set_buttons_state(tk.NORMAL)
 
     def run_manual_process(self, parcel_num, vol, pg, doc_type="Deed"):
         try:
@@ -2098,8 +2077,7 @@ class AutomatorApp:
         except Exception as e:
             self.log(f"Manual download failed: {e}")
         finally:
-            self.run_btn.config(state=tk.NORMAL)
-            self.manual_btn.config(state=tk.NORMAL)
+            self.set_buttons_state(tk.NORMAL)
 
     def load_shapefile(self):
         if self.gdf is None:
@@ -2639,8 +2617,7 @@ class AutomatorApp:
             row = self.gdf[self.gdf['parcel_no'] == parcel_num]
             if row.empty:
                 self.log(f"ERROR: Parcel {parcel_num} not found in shapefile.")
-                if hasattr(self, 'run_btn'):
-                    self.run_btn.config(state=tk.NORMAL)
+                self.set_buttons_state(tk.NORMAL)
                 return
 
             parcel_data = row.iloc[0]
@@ -3209,13 +3186,7 @@ class AutomatorApp:
             import traceback
             traceback.print_exc()
         finally:
-            if hasattr(self, 'run_btn'):
-                try:
-                    self.run_btn.config(state=tk.NORMAL)
-                except:
-                    pass
-            if hasattr(self, 'manual_btn'):
-                self.manual_btn.config(state=tk.NORMAL)
+            self.set_buttons_state(tk.NORMAL)
 
     def cancel_organizer(self):
         import os
