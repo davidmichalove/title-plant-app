@@ -3608,41 +3608,6 @@ end tell'''
         except Exception as e:
             self.log(f"Error deleting note: {e}")
 
-class KofileStreamingProgressWindow(tk.Toplevel):
-    def __init__(self, master, party_name):
-        super().__init__(master)
-        self.title(f"⚡ Title AI Streaming Engine - {party_name}")
-        self.geometry("640x440")
-        self.minsize(550, 350)
-        self.transient(master)
-        
-        # Header
-        top_frame = ttk.Frame(self, padding=12)
-        top_frame.pack(fill=tk.X)
-        
-        ttk.Label(top_frame, text=f"⚡ Title AI Streaming Engine: {party_name}", font=("Helvetica", 13, "bold")).pack(anchor=tk.W)
-        self.status_lbl = ttk.Label(top_frame, text="Starting search on Belmont County Recorder...", font=("Helvetica", 10), foreground="#4a5568")
-        self.status_lbl.pack(anchor=tk.W, pady=(2, 4))
-        
-        self.progress_bar = ttk.Progressbar(top_frame, orient=tk.HORIZONTAL, mode="indeterminate")
-        self.progress_bar.pack(fill=tk.X, pady=(4, 8))
-        self.progress_bar.start(10)
-        
-        # Live Activity Log Area
-        log_frame = ttk.LabelFrame(self, text="📜 Live Activity & AI Triage Log", padding=8)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
-        
-        import tkinter.scrolledtext as st
-        self.log_text = st.ScrolledText(log_frame, wrap=tk.WORD, font=("Courier", 10))
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-        
-        # Bottom controls
-        btn_frame = ttk.Frame(self, padding=(12, 8))
-        btn_frame.pack(fill=tk.X)
-        
-        self.close_btn = ttk.Button(btn_frame, text="Minimize / Close Window", command=self.destroy)
-        self.close_btn.pack(side=tk.RIGHT)
-
     def _run_kofile_streaming_pipeline(self, name, start_date, end_date, target_lot, target_parcel, pid_dir, progress_win=None):
         import time, json, os, re, shutil, queue, threading
         from playwright.sync_api import sync_playwright
@@ -5079,6 +5044,41 @@ class KofileStreamingProgressWindow(tk.Toplevel):
 
 import queue
 import threading
+
+class KofileStreamingProgressWindow(tk.Toplevel):
+    def __init__(self, master, party_name):
+        super().__init__(master)
+        self.title(f"⚡ Title AI Streaming Engine - {party_name}")
+        self.geometry("640x440")
+        self.minsize(550, 350)
+        self.transient(master)
+        
+        # Header
+        top_frame = ttk.Frame(self, padding=12)
+        top_frame.pack(fill=tk.X)
+        
+        ttk.Label(top_frame, text=f"⚡ Title AI Streaming Engine: {party_name}", font=("Helvetica", 13, "bold")).pack(anchor=tk.W)
+        self.status_lbl = ttk.Label(top_frame, text="Starting search on Belmont County Recorder...", font=("Helvetica", 10), foreground="#4a5568")
+        self.status_lbl.pack(anchor=tk.W, pady=(2, 4))
+        
+        self.progress_bar = ttk.Progressbar(top_frame, orient=tk.HORIZONTAL, mode="indeterminate")
+        self.progress_bar.pack(fill=tk.X, pady=(4, 8))
+        self.progress_bar.start(10)
+        
+        # Live Activity Log Area
+        log_frame = ttk.LabelFrame(self, text="📜 Live Activity & AI Triage Log", padding=8)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+        
+        import tkinter.scrolledtext as st
+        self.log_text = st.ScrolledText(log_frame, wrap=tk.WORD, font=("Courier", 10))
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Bottom controls
+        btn_frame = ttk.Frame(self, padding=(12, 8))
+        btn_frame.pack(fill=tk.X)
+        
+        self.close_btn = ttk.Button(btn_frame, text="Minimize / Close Window", command=self.destroy)
+        self.close_btn.pack(side=tk.RIGHT)
 
 class SOPChatWindow(tk.Toplevel):
     def __init__(self, master, api_key):
