@@ -2220,19 +2220,9 @@ class AutomatorApp:
                     break
                     
             if not found:
-                self.log(f"Deed not found locally or in backup: {vol}-{pg}")
-                from tkinter import messagebox
-                if not os.path.exists(primary_dir) and not os.path.exists(backup_dir):
-                    msg = f"The entire Volume {vol} folder is missing from your hard drive!\n\n(Checked: {primary_dir}\nAnd: {backup_dir})"
-                    missing_type = "Volume"
-                else:
-                    msg = f"Volume {vol} exists, but Page {pg} is missing from it!\n\n(Checked: {primary_dir}\nAnd: {backup_dir})"
-                    missing_type = "Page"
-                    
-                # Log the missing document
+                missing_type = "Volume" if not os.path.exists(primary_dir) and not os.path.exists(backup_dir) else "Page"
+                self.log(f"ℹ️ {doc_type} Vol {vol} Pg {pg} not found in local drive ({missing_type} missing). Logged to tracker.")
                 self.log_missing_document(parcel_num, doc_type, vol, pg, missing_type)
-                
-                messagebox.showwarning("Deed Not Found", msg)
                 return False
                     
             import shutil
@@ -2969,12 +2959,7 @@ class AutomatorApp:
                                         self._fetch_kofile_deed_background(vol, pg, parcel_num)
                                 
                                 if missing_gemini_deeds:
-                                    def show_missing_batch(missing_list=missing_gemini_deeds):
-                                        from tkinter import messagebox
-                                        msg = "Gemini Auto-Fetch completed, but the following deeds were missing locally:\n\n" + "\n".join(missing_list)
-                                        messagebox.showwarning("Gemini Auto-Fetch: Missing Deeds", msg)
-                                    if hasattr(self, 'root'):
-                                        self.root.after(0, show_missing_batch)
+                                    self.log(f"ℹ️ Gemini Auto-Fetch missing local deeds: {', '.join(missing_gemini_deeds)}")
                                         
                             else:
                                 self.log("Gemini successfully analyzed the document but did not find any deeds.")
