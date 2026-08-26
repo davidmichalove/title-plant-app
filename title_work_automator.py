@@ -3175,7 +3175,14 @@ class AutomatorApp:
                                 self.log("Extracting structured name/date search parameters from deeds for Kofile Name Search...")
                                 search_params = ai_parser.generate_kofile_search_params(api_key, pulled_pdfs)
                                 if search_params:
-                                    self._fetch_kofile_name_search(search_params, pid_dir)
+                                    for sp in search_params:
+                                        s_name = sp.get("name", "")
+                                        s_acq = sp.get("acquisition_date", "")
+                                        s_disp = sp.get("disposal_date", "")
+                                        s_lot = sp.get("target_lot", "")
+                                        s_pid = sp.get("target_parcel", parcel_num)
+                                        if s_name:
+                                            self._run_kofile_streaming_pipeline(s_name, s_acq, s_disp, s_lot, s_pid, pid_dir)
                                     self._fetch_court_name_search(search_params, pid_dir)
                                 else:
                                     self.log("No valid name search parameters extracted.")
