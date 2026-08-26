@@ -3904,17 +3904,21 @@ end tell'''
                 except queue.Empty:
                     break
 
-                res = self.copy_local_deed(target_parcel, vol, pg, doc_type=dtype, auto_open=False, custom_dest_dir=target_dir)
                 clean_type = "".join(c for c in dtype if c.isalnum() or c in " _-").strip() or "DOC"
                 expected_pdf = os.path.join(target_dir, f"{vol}-{pg} {clean_type}.pdf")
 
-                if not res:
+                # Always grab directly from Kofile website matching party last name
+                if os.path.exists(expected_pdf) and os.path.getsize(expected_pdf) > 1000:
+                    res = True
+                else:
                     log_msg(f"⬇️ [Worker-{worker_id}] Downloading Kofile: {dtype} Vol {vol} Pg {pg}...")
                     res = self._fetch_kofile_single_doc_worker(vol, pg, dtype, target_dir, last_name=last_name)
 
                 if res and os.path.exists(expected_pdf):
                     ai_queue.put((expected_pdf, dtype))
                     log_msg(f"✅ [Worker-{worker_id}] Downloaded: {os.path.basename(expected_pdf)}")
+                else:
+                    log_msg(f"⚠️ [Worker-{worker_id}] Could not download: {dtype} Vol {vol} Pg {pg}")
 
                 completed_downloads[0] += 1
                 cur = completed_downloads[0]
